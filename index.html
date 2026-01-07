@@ -1,0 +1,128 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Classroom Manager</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="container">
+    <!-- HOME PAGE -->
+    <div id="homePage">
+      <h1>🎓 Classroom Manager</h1>
+      
+      <h2>📚 Your Classes</h2>
+      <div class="class-list" id="classList"></div>
+      <button class="btn" onclick="showAddClassModal()">+ Add New Class</button>
+      
+      <h2 style="margin-top: 40px;">🏫 Your Classrooms</h2>
+      <div class="classroom-list" id="classroomList"></div>
+      <button class="btn btn-secondary" onclick="showAddClassroomModal()">+ Add New Classroom</button>
+    </div>
+
+    <!-- CLASS PAGE -->
+    <div id="classPage" class="hidden">
+      <div class="class-header">
+        <div>
+          <h1 id="className"></h1>
+          <p style="color: #667eea; margin-top: 5px;">
+            Classroom: <strong id="currentClassroomName">Not selected</strong>
+            <button class="btn btn-small" onclick="showSelectClassroomModal()" style="margin-left: 10px;">Change Classroom</button>
+          </p>
+        </div>
+        <button class="btn btn-small" onclick="showHomePage()">← Back to Classes</button>
+      </div>
+      
+      <div class="class-controls">
+        <button class="btn btn-small" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
+        <button class="btn btn-small" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
+        <button class="btn btn-small" onclick="randomizeSeating()">🎲 Randomize Students</button>
+        <button class="btn btn-small btn-secondary" onclick="saveSeating()">💾 Save Layout</button>
+        <button class="btn btn-small" onclick="showWheel()">🎡 Student Picker</button>
+      </div>
+
+      <div class="seating-chart" id="seatingChart"></div>
+    </div>
+
+    <!-- CLASSROOM EDITOR PAGE -->
+    <div id="classroomEditorPage" class="hidden">
+      <div class="class-header">
+        <h1>🏫 Edit Classroom: <span id="editorClassroomName"></span></h1>
+        <button class="btn btn-small" onclick="exitClassroomEditor()">← Back</button>
+      </div>
+      
+      <div class="class-controls">
+        <p style="color: #667eea; font-weight: 600;">Drag desks to position them in the classroom</p>
+        <button class="btn btn-secondary" onclick="saveClassroomLayout()">💾 Save Classroom Layout</button>
+      </div>
+
+      <div class="seating-chart" id="classroomEditorChart"></div>
+    </div>
+  </div>
+
+  <!-- Add Class Modal -->
+  <div class="modal" id="addClassModal">
+    <div class="modal-content">
+      <h2>Add New Class</h2>
+      <div class="form-group">
+        <label for="classNameInput">Class Name</label>
+        <input type="text" id="classNameInput" placeholder="e.g., 5th Grade A">
+      </div>
+      <div class="form-group">
+        <label for="studentsInput">Students (SURNAME NAME, separated by commas)</label>
+        <textarea id="studentsInput" placeholder="Rossi Mario, Bianchi Luca, Verdi Anna"></textarea>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn" onclick="addClass()">Create Class</button>
+        <button class="btn btn-danger" onclick="closeModal('addClassModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Classroom Modal -->
+  <div class="modal" id="addClassroomModal">
+    <div class="modal-content">
+      <h2>Add New Classroom</h2>
+      <div class="form-group">
+        <label for="classroomNameInput">Classroom Name</label>
+        <input type="text" id="classroomNameInput" placeholder="e.g., Room 101, Lab A">
+      </div>
+      <div class="form-group">
+        <label for="classroomDesksInput">Number of Desks</label>
+        <input type="number" id="classroomDesksInput" min="1" max="50" value="20">
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-secondary" onclick="addClassroom()">Create Classroom</button>
+        <button class="btn btn-danger" onclick="closeModal('addClassroomModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Select Classroom Modal -->
+  <div class="modal" id="selectClassroomModal">
+    <div class="modal-content">
+      <h2>Select Classroom</h2>
+      <div id="selectClassroomList" style="margin: 20px 0;"></div>
+      <button class="btn btn-danger" onclick="closeModal('selectClassroomModal')">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Wheel Modal -->
+  <div class="modal" id="wheelModal">
+    <div class="modal-content">
+      <h2>🎡 Student Picker Wheel</h2>
+      <div class="wheel-container">
+        <canvas id="wheelCanvas" width="400" height="400"></canvas>
+        <button class="btn" onclick="spinWheel()">Spin!</button>
+        <div class="wheel-result" id="wheelResult"></div>
+      </div>
+      <button class="btn btn-danger" onclick="closeModal('wheelModal')">Close</button>
+    </div>
+  </div>
+
+<script src="script.js"></script>
+</body>
+</html>
