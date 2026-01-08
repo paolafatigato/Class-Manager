@@ -159,6 +159,18 @@
       document.getElementById('currentClassroomName').textContent = classroom.name;
       renderSeatingChart();
     }
+    //Delete Class
+function deleteClass(classId) {
+  if (!confirm('Delete this class?')) return;
+
+  const index = classes.findIndex(c => c.id === classId);
+  if (index === -1) return;
+
+  classes.splice(index, 1);
+
+  renderClassList();
+}
+
 
     // Delete classroom
     function deleteClassroom(classroomId) {
@@ -311,27 +323,32 @@
     }
 
     // Render class list on home page
-    function renderClassList() {
-      const container = document.getElementById('classList');
-      container.innerHTML = '';
 
-      classes.forEach(cls => {
-        const card = document.createElement('div');
-        card.className = 'class-card';
-        card.onclick = () => openClass(cls.id);
-        
-        const classroomName = cls.selectedClassroomId 
-          ? classrooms.find(c => c.id === cls.selectedClassroomId)?.name || 'Not selected'
-          : 'Not selected';
-        
-        card.innerHTML = `
-          <h3>${cls.name}</h3>
-          <p>${cls.students.length} students</p>
-          <p style="font-size: 0.85em; margin-top: 8px;">📍 ${classroomName}</p>
-        `;
-        container.appendChild(card);
-      });
-    }
+function renderClassList() {
+  const container = document.getElementById('classList');
+  container.innerHTML = '';
+
+  classes.forEach(cls => {
+    const card = document.createElement('div');
+    card.className = 'class-card';
+
+    const classroomName = cls.selectedClassroomId
+      ? classrooms.find(c => c.id === cls.selectedClassroomId)?.name || 'Not selected'
+      : 'Not selected';
+
+    card.innerHTML = `
+      <button class="delete-btn"
+        onclick="event.stopPropagation(); deleteClass('${cls.id}')">×</button>
+      <h3>${cls.name}</h3>
+      <p>${cls.students.length} students</p>
+      <p style="font-size: 0.85em; margin-top: 8px;">📍 ${classroomName}</p>
+    `;
+
+    card.onclick = () => openClass(cls.id);
+    container.appendChild(card);
+  });
+}
+
 
     // Render classroom list on home page
     function renderClassroomList() {
