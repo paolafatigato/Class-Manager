@@ -69,6 +69,10 @@
         });
     }
 
+        // Show add class modal
+    function showAddClassModal() {
+      document.getElementById('addClassModal').classList.add('active');
+    }
     // Show add classroom modal
     function showAddClassroomModal() {
       document.getElementById('addClassroomModal').classList.add('active');
