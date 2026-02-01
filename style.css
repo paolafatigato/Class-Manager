@@ -332,8 +332,39 @@ h2 {
   border-radius: 15px;
   padding: 30px;
   min-height: 500px;
+  max-height: 900px;
+  overflow: auto;
   margin-bottom: 30px;
   position: relative;
+}
+
+.teacher-desk {
+  position: absolute;
+  width: 240px;
+  height: 90px;
+  background: linear-gradient(135deg, #f6ad55 0%, #ed8936 100%);
+  border: 3px solid #dd6b20;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 8px 20px rgba(221, 107, 32, 0.35);
+  user-select: none;
+  z-index: 2;
+}
+
+.teacher-desk.edit-mode {
+  cursor: move;
+}
+
+.teacher-desk-label {
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
 }
 
 .student-seat {
@@ -365,6 +396,19 @@ h2 {
 .student-seat.edit-mode {
   cursor: move;
   border-color: #48bb78;
+}
+
+.student-seat.selected {
+  box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.7);
+}
+
+.selection-box {
+  position: absolute;
+  border: 2px dashed #667eea;
+  background: rgba(102, 126, 234, 0.15);
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 8px;
 }
 
 .student-seat.student-mode .student-name {
