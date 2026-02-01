@@ -11,6 +11,14 @@ let editMode = false;
 let studentMode = false;
 let draggedStudentName = null;
 let draggedFromSeat = null;
+let selectedSeats = new Set();
+let isSelecting = false;
+let selectionStart = null;
+let selectionBoxEl = null;
+let selectionChartEl = null;
+let dragGroupData = null;
+let dragStartPoint = null;
+let dragChartEl = null;
 
 // ========== UI FUNCTIONS ==========
 
@@ -139,6 +147,7 @@ function addClass() {
     name: className,
     students: students,
     seating: null,
+    seatingByClassroom: {},
     selectedClassroomId: null
   };
 
@@ -233,10 +242,17 @@ function addClassroom() {
     });
   }
 
+  const layoutWidth = cols * 150;
+  const teacherDesk = {
+    x: Math.max(20, (layoutWidth / 2) - 120),
+    y: 20
+  };
+
   const newClassroom = {
     id: Date.now().toString(),
     name: name,
-    desks: desks
+    desks: desks,
+    teacherDesk: teacherDesk
   };
 
   classrooms.push(newClassroom);
@@ -254,6 +270,9 @@ function deleteClassroom(classroomId) {
   classrooms = classrooms.filter(c => c.id !== classroomId);
   
   classes.forEach(cls => {
+    if (cls.seatingByClassroom && cls.seatingByClassroom[classroomId]) {
+      delete cls.seatingByClassroom[classroomId];
+    }
     if (cls.selectedClassroomId === classroomId) {
       cls.selectedClassroomId = null;
       cls.seating = null;
@@ -308,8 +327,8 @@ function showSelectClassroomModal() {
 
 function selectClassroom(classroomId) {
   const cls = classes.find(c => c.id === currentClassId);
+  ensureSeatingByClassroom(cls);
   cls.selectedClassroomId = classroomId;
-  cls.seating = null;
   
   debouncedSave();
   closeModal('selectClassroomModal');
@@ -342,6 +361,20 @@ function renderClassroomEditor() {
   const classroom = classrooms.find(c => c.id === currentClassroomId);
   const chart = document.getElementById('classroomEditorChart');
   chart.innerHTML = '';
+  clearSeatSelection();
+
+  if (!chart.dataset.selectionReady) {
+    chart.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.student-seat') || e.target.closest('.teacher-desk')) return;
+      startSelection(e, chart);
+    });
+    chart.dataset.selectionReady = 'true';
+  }
+
+  const teacherDesk = getTeacherDesk(classroom);
+  const teacherDeskEl = createTeacherDeskElement(teacherDesk.x, teacherDesk.y, true);
+  teacherDeskEl.addEventListener('mousedown', (e) => startDragClassroomDesk(e, teacherDeskEl));
+  chart.appendChild(teacherDeskEl);
 
   classroom.desks.forEach((desk, index) => {
     const deskEl = document.createElement('div');
@@ -355,15 +388,20 @@ function renderClassroomEditor() {
     label.textContent = `Desk ${index + 1}`;
     deskEl.appendChild(label);
     
-    deskEl.addEventListener('mousedown', (e) => startDragClassroomDesk(e, deskEl));
+    deskEl.addEventListener('mousedown', (e) => handleDeskPointerDown(e, deskEl, chart));
     chart.appendChild(deskEl);
   });
+
+  updateChartHeight(chart);
 }
 
 function startDragClassroomDesk(e, deskEl) {
   isDragging = true;
   dragElement = deskEl;
   dragElement.classList.add('dragging');
+  dragChartEl = document.getElementById('classroomEditorChart');
+  dragGroupData = null;
+  dragStartPoint = null;
   
   const rect = dragElement.getBoundingClientRect();
   offsetX = e.clientX - rect.left;
@@ -375,15 +413,20 @@ function startDragClassroomDesk(e, deskEl) {
 
 function dragClassroomDesk(e) {
   if (!isDragging) return;
-  const chartRect = document.getElementById('classroomEditorChart').getBoundingClientRect();
+  const chartRect = dragChartEl.getBoundingClientRect();
   dragElement.style.left = Math.max(0, e.clientX - chartRect.left - offsetX) + 'px';
   dragElement.style.top = Math.max(0, e.clientY - chartRect.top - offsetY) + 'px';
+  updateChartHeight(dragChartEl);
 }
 
 function stopDragClassroomDesk() {
   if (dragElement) dragElement.classList.remove('dragging');
   isDragging = false;
   dragElement = null;
+  if (dragChartEl) updateChartHeight(dragChartEl);
+  dragChartEl = null;
+  dragGroupData = null;
+  dragStartPoint = null;
   document.removeEventListener('mousemove', dragClassroomDesk);
   document.removeEventListener('mouseup', stopDragClassroomDesk);
 }
@@ -391,6 +434,14 @@ function stopDragClassroomDesk() {
 function saveClassroomLayout() {
   const classroom = classrooms.find(c => c.id === currentClassroomId);
   const desks = Array.from(document.querySelectorAll('#classroomEditorChart .student-seat'));
+
+  const teacherDeskEl = document.querySelector('#classroomEditorChart .teacher-desk');
+  if (teacherDeskEl) {
+    classroom.teacherDesk = {
+      x: parseInt(teacherDeskEl.style.left),
+      y: parseInt(teacherDeskEl.style.top)
+    };
+  }
   
   classroom.desks = desks.map(desk => ({
     id: desk.dataset.deskId,
@@ -404,10 +455,94 @@ function saveClassroomLayout() {
 
 // ========== SEATING CHART ==========
 
+const CHART_MIN_HEIGHT = 500;
+const CHART_MAX_HEIGHT = 900;
+const CHART_PADDING = 60;
+
+function updateChartHeight(chart) {
+  if (!chart) return;
+  const elements = chart.querySelectorAll('.student-seat, .teacher-desk');
+  if (elements.length === 0) {
+    chart.style.height = '';
+    chart.style.paddingBottom = '';
+    return;
+  }
+
+  let maxBottom = 0;
+  elements.forEach(el => {
+    const top = parseInt(el.style.top) || 0;
+    const height = el.offsetHeight || 0;
+    maxBottom = Math.max(maxBottom, top + height);
+  });
+
+  const desired = Math.max(CHART_MIN_HEIGHT, maxBottom + CHART_PADDING);
+
+  if (desired <= CHART_MAX_HEIGHT) {
+    chart.style.height = desired + 'px';
+    chart.style.paddingBottom = '';
+    return;
+  }
+
+  chart.style.height = CHART_MAX_HEIGHT + 'px';
+  chart.style.paddingBottom = (desired - CHART_MAX_HEIGHT) + 'px';
+}
+
+function getTeacherDesk(classroom) {
+  if (classroom.teacherDesk && Number.isFinite(classroom.teacherDesk.x) && Number.isFinite(classroom.teacherDesk.y)) {
+    return classroom.teacherDesk;
+  }
+
+  const deskCount = classroom.desks?.length || 0;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(deskCount || 1)));
+  const layoutWidth = cols * 150;
+  return {
+    x: Math.max(20, (layoutWidth / 2) - 120),
+    y: 20
+  };
+}
+
+function createTeacherDeskElement(x, y, isEditable = false) {
+  const desk = document.createElement('div');
+  desk.className = 'teacher-desk';
+  if (isEditable) desk.classList.add('edit-mode');
+  desk.style.left = x + 'px';
+  desk.style.top = y + 'px';
+
+  const label = document.createElement('div');
+  label.className = 'teacher-desk-label';
+  label.textContent = 'Teacher Desk';
+  desk.appendChild(label);
+
+  return desk;
+}
+
+function ensureSeatingByClassroom(cls) {
+  if (!cls) return;
+  if (!cls.seatingByClassroom || typeof cls.seatingByClassroom !== 'object') {
+    cls.seatingByClassroom = {};
+  }
+
+  if (cls.seating && cls.selectedClassroomId && !cls.seatingByClassroom[cls.selectedClassroomId]) {
+    cls.seatingByClassroom[cls.selectedClassroomId] = cls.seating;
+  }
+}
+
 function renderSeatingChart() {
   const cls = classes.find(c => c.id === currentClassId);
   const chart = document.getElementById('seatingChart');
   chart.innerHTML = '';
+  clearSeatSelection();
+
+  ensureSeatingByClassroom(cls);
+
+  if (!chart.dataset.selectionReady) {
+    chart.addEventListener('mousedown', (e) => {
+      if (!editMode) return;
+      if (e.target.closest('.student-seat') || e.target.closest('.teacher-desk')) return;
+      startSelection(e, chart);
+    });
+    chart.dataset.selectionReady = 'true';
+  }
 
   editMode = false;
   studentMode = false;
@@ -415,18 +550,27 @@ function renderSeatingChart() {
 
   if (!cls.selectedClassroomId) {
     chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #999;"><h3>No classroom selected</h3><p>Please select a classroom to view the seating chart.</p></div>';
+    chart.style.height = '';
+    chart.style.paddingBottom = '';
     return;
   }
 
   const classroom = classrooms.find(c => c.id === cls.selectedClassroomId);
   if (!classroom) {
     chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #f56565;"><h3>Classroom not found</h3></div>';
+    chart.style.height = '';
+    chart.style.paddingBottom = '';
     return;
   }
 
-  if (cls.seating && cls.seating.length > 0) {
+  const teacherDesk = getTeacherDesk(classroom);
+  chart.appendChild(createTeacherDeskElement(teacherDesk.x, teacherDesk.y));
+
+  const savedSeating = cls.seatingByClassroom?.[cls.selectedClassroomId] || null;
+
+  if (savedSeating && savedSeating.length > 0) {
     classroom.desks.forEach((desk, index) => {
-      const savedSeat = cls.seating.find(s => s.deskId === desk.id);
+      const savedSeat = savedSeating.find(s => s.deskId === desk.id);
       createSeatElement(savedSeat?.displayName || '', desk.x, desk.y, index, desk.id);
     });
   } else {
@@ -435,6 +579,8 @@ function renderSeatingChart() {
       createSeatElement(shuffled[index]?.displayName || '', desk.x, desk.y, index, desk.id);
     });
   }
+
+  updateChartHeight(chart);
 }
 
 function createSeatElement(displayName, x, y, index, deskId) {
@@ -455,7 +601,7 @@ function createSeatElement(displayName, x, y, index, deskId) {
   seat.appendChild(nameEl);
   
   seat.addEventListener('mousedown', (e) => {
-    if (editMode && e.target === seat) startDragDesk(e, seat);
+    if (editMode && e.target === seat) handleDeskPointerDown(e, seat, document.getElementById('seatingChart'));
   });
   
   nameEl.addEventListener('mousedown', (e) => {
@@ -473,6 +619,8 @@ function createSeatElement(displayName, x, y, index, deskId) {
 function toggleEditMode() {
   editMode = !editMode;
   studentMode = false;
+  clearSeatSelection();
+  stopSelection();
   updateModeButtons();
   updateSeatStyles();
 }
@@ -480,6 +628,8 @@ function toggleEditMode() {
 function toggleStudentMode() {
   studentMode = !studentMode;
   editMode = false;
+  clearSeatSelection();
+  stopSelection();
   updateModeButtons();
   updateSeatStyles();
 }
@@ -503,11 +653,145 @@ function updateSeatStyles() {
   });
 }
 
+// ========== MULTI-SELECTION HELPERS ===========
+
+function clearSeatSelection() {
+  selectedSeats.forEach(seat => seat.classList.remove('selected'));
+  selectedSeats.clear();
+}
+
+function addSeatToSelection(seat) {
+  selectedSeats.add(seat);
+  seat.classList.add('selected');
+}
+
+function removeSeatFromSelection(seat) {
+  selectedSeats.delete(seat);
+  seat.classList.remove('selected');
+}
+
+function getRelativePoint(e, chart) {
+  const rect = chart.getBoundingClientRect();
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  };
+}
+
+function getSelectionRect(start, current) {
+  const left = Math.min(start.x, current.x);
+  const top = Math.min(start.y, current.y);
+  const width = Math.abs(current.x - start.x);
+  const height = Math.abs(current.y - start.y);
+  return { left, top, width, height };
+}
+
+function ensureSelectionBox(chart) {
+  if (!selectionBoxEl || selectionBoxEl.parentElement !== chart) {
+    if (selectionBoxEl && selectionBoxEl.parentElement) {
+      selectionBoxEl.parentElement.removeChild(selectionBoxEl);
+    }
+    selectionBoxEl = document.createElement('div');
+    selectionBoxEl.className = 'selection-box';
+    chart.appendChild(selectionBoxEl);
+  }
+}
+
+function updateSelectionBox(rect) {
+  if (!selectionBoxEl) return;
+  selectionBoxEl.style.left = rect.left + 'px';
+  selectionBoxEl.style.top = rect.top + 'px';
+  selectionBoxEl.style.width = rect.width + 'px';
+  selectionBoxEl.style.height = rect.height + 'px';
+}
+
+function rectsIntersect(a, b) {
+  return !(b.left > a.left + a.width ||
+           b.left + b.width < a.left ||
+           b.top > a.top + a.height ||
+           b.top + b.height < a.top);
+}
+
+function startSelection(e, chart) {
+  if (e.button !== 0) return;
+  isSelecting = true;
+  selectionChartEl = chart;
+  selectionStart = getRelativePoint(e, chart);
+  ensureSelectionBox(chart);
+  updateSelectionBox({ left: selectionStart.x, top: selectionStart.y, width: 0, height: 0 });
+  clearSeatSelection();
+  document.addEventListener('mousemove', onSelectionMove);
+  document.addEventListener('mouseup', stopSelection);
+}
+
+function onSelectionMove(e) {
+  if (!isSelecting || !selectionChartEl) return;
+  const current = getRelativePoint(e, selectionChartEl);
+  const rect = getSelectionRect(selectionStart, current);
+  updateSelectionBox(rect);
+
+  const chartRect = selectionChartEl.getBoundingClientRect();
+  selectionChartEl.querySelectorAll('.student-seat').forEach(seat => {
+    const seatRect = seat.getBoundingClientRect();
+    const seatBox = {
+      left: seatRect.left - chartRect.left,
+      top: seatRect.top - chartRect.top,
+      width: seatRect.width,
+      height: seatRect.height
+    };
+    if (rectsIntersect(rect, seatBox)) addSeatToSelection(seat);
+    else removeSeatFromSelection(seat);
+  });
+}
+
+function stopSelection() {
+  isSelecting = false;
+  selectionStart = null;
+  if (selectionBoxEl && selectionBoxEl.parentElement) {
+    selectionBoxEl.parentElement.removeChild(selectionBoxEl);
+  }
+  selectionBoxEl = null;
+  selectionChartEl = null;
+  document.removeEventListener('mousemove', onSelectionMove);
+  document.removeEventListener('mouseup', stopSelection);
+}
+
+function handleDeskPointerDown(e, seat, chart) {
+  if (e.button !== 0) return;
+  if (!editMode && chart.id === 'seatingChart') return;
+
+  if (selectedSeats.has(seat)) {
+    startDragDesk(e, seat, chart);
+    return;
+  }
+
+  clearSeatSelection();
+  addSeatToSelection(seat);
+  startDragDesk(e, seat, chart);
+}
+
 // ========== DRAG DESK ==========
 
-function startDragDesk(e, seat) {
-  if (!editMode) return;
+function startDragDesk(e, seat, chart) {
+  if (chart.id === 'seatingChart' && !editMode) return;
   isDragging = true;
+  dragChartEl = chart;
+
+  if (selectedSeats.size > 1 && selectedSeats.has(seat)) {
+    dragGroupData = Array.from(selectedSeats).map(s => ({
+      el: s,
+      startLeft: parseInt(s.style.left),
+      startTop: parseInt(s.style.top)
+    }));
+    dragStartPoint = getRelativePoint(e, chart);
+    selectedSeats.forEach(s => s.classList.add('dragging'));
+    document.addEventListener('mousemove', dragDesk);
+    document.addEventListener('mouseup', stopDragDesk);
+    return;
+  }
+
+  dragGroupData = null;
+  dragStartPoint = null;
   dragElement = seat;
   dragElement.classList.add('dragging');
   
@@ -520,16 +804,37 @@ function startDragDesk(e, seat) {
 }
 
 function dragDesk(e) {
-  if (!isDragging || !editMode) return;
-  const chartRect = document.getElementById('seatingChart').getBoundingClientRect();
+  if (!isDragging) return;
+  if (!dragChartEl) return;
+
+  if (dragGroupData && dragStartPoint) {
+    const current = getRelativePoint(e, dragChartEl);
+    const dx = current.x - dragStartPoint.x;
+    const dy = current.y - dragStartPoint.y;
+    dragGroupData.forEach(item => {
+      item.el.style.left = Math.max(0, item.startLeft + dx) + 'px';
+      item.el.style.top = Math.max(0, item.startTop + dy) + 'px';
+    });
+    return;
+  }
+
+  const chartRect = dragChartEl.getBoundingClientRect();
   dragElement.style.left = Math.max(0, e.clientX - chartRect.left - offsetX) + 'px';
   dragElement.style.top = Math.max(0, e.clientY - chartRect.top - offsetY) + 'px';
+  updateChartHeight(dragChartEl);
 }
 
 function stopDragDesk() {
+  if (dragGroupData) {
+    selectedSeats.forEach(s => s.classList.remove('dragging'));
+  }
   if (dragElement) dragElement.classList.remove('dragging');
   isDragging = false;
   dragElement = null;
+  dragGroupData = null;
+  dragStartPoint = null;
+  if (dragChartEl) updateChartHeight(dragChartEl);
+  dragChartEl = null;
   document.removeEventListener('mousemove', dragDesk);
   document.removeEventListener('mouseup', stopDragDesk);
 }
@@ -628,8 +933,14 @@ function randomizeSeating() {
 function saveSeating() {
   const cls = classes.find(c => c.id === currentClassId);
   const seats = Array.from(document.querySelectorAll('.student-seat'));
+
+  ensureSeatingByClassroom(cls);
+  if (!cls.selectedClassroomId) {
+    alert('Please select a classroom before saving the layout.');
+    return;
+  }
   
-  cls.seating = seats.map(seat => {
+  const newSeating = seats.map(seat => {
     const nameEl = seat.querySelector('.student-name');
     return {
       displayName: nameEl.dataset.name || '',
@@ -638,6 +949,8 @@ function saveSeating() {
       deskId: seat.dataset.deskId
     };
   });
+
+  cls.seatingByClassroom[cls.selectedClassroomId] = newSeating;
   
   debouncedSave();
   alert('Seating layout saved!');
