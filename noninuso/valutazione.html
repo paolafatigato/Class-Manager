@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valutazione</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+        .view-panel { border: 1px solid #888; border-radius: 6px; padding: 8px; background: #f9f9f9; margin: 4px; }
+        .section { font-weight: bold; margin-bottom: 4px; }
+        .subsection { margin-left: 12px; color: #555; }
+        .final { margin-top: 6px; color: #007700; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Valutazione</h1>
+    <label for="classeSelect"><b>Classe:</b></label>
+    <select id="classeSelect">
+        <option value="1A">1A</option>
+        <option value="2A">2A</option>
+    </select>
+    <br><br>
+    <table id="valutazioneTable">
+        <thead>
+            <tr>
+                <th>Studente</th>
+                <th>Sezione 1</th>
+                <th>Sezione 2</th>
+                <th>Finale</th>
+            </tr>
+        </thead>
+        <tbody id="studentiBody">
+            <!-- Gli studenti verranno inseriti qui -->
+        </tbody>
+    </table>
+    <script>
+    // Dati di esempio per le classi
+    const classi = {
+        '1A': ['Mario Rossi', 'Giulia Bianchi', 'Luca Verdi'],
+        '2A': ['Anna Neri', 'Paolo Blu', 'Sara Gialli']
+    };
+
+    function renderStudenti(classe) {
+        const studenti = classi[classe] || [];
+        const tbody = document.getElementById('studentiBody');
+        tbody.innerHTML = studenti.map(nome => `
+            <tr>
+                <td>${nome}</td>
+                <td><input type="number" min="0" max="10" placeholder="Voto sezione 1"></td>
+                <td><input type="number" min="0" max="10" placeholder="Voto sezione 2"></td>
+                <td><input type="number" min="0" max="10" placeholder="Finale"></td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('classeSelect').addEventListener('change', function() {
+        renderStudenti(this.value);
+    });
+
+    // Mostra la prima classe all'avvio
+    renderStudenti(document.getElementById('classeSelect').value);
+    </script>
+</body>
+</html>
