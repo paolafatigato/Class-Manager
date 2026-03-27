@@ -166,16 +166,19 @@ function createRandomGroupsBySize() {
     const j = Math.floor(Math.random() * (i + 1));
     [students[i], students[j]] = [students[j], students[i]];
   }
-  // Crea i gruppi da size persone
+  // Crea i gruppi da size persone (tieni oggetti, non solo stringhe)
   const groups = [];
   for (let i = 0; i < students.length; i += size) {
-    groups.push(students.slice(i, i + size).map(s => s.displayName || s.fullName));
+    groups.push(students.slice(i, i + size));
   }
+  _lastGroups = groups;
   // Mostra i risultati
   let html = '';
   groups.forEach((group, i) => {
-    html += `<div style=\"margin-bottom:10px;\"><strong>Gruppo ${i + 1}:</strong> ${group.join(', ')}</div>`;
+    const names = group.map(s => s.displayName || s.fullName).join(', ');
+    html += `<div style="margin-bottom:10px;"><strong>Gruppo ${i + 1}:</strong> ${names}</div>`;
   });
+  html += _arrangeBtn();
   document.getElementById('groupResults').innerHTML = html;
 }
 function createRandomGroupsFromInput() {
@@ -188,6 +191,7 @@ function createRandomGroupsFromInput() {
 let classes = [];
 let classrooms = [];
 let currentClassId = null;
+let _lastGroups = []; // ultimo set di gruppi creati, usato da arrangeGroupsOnSeats()
 let currentClassroomId = null;
 let isDragging = false;
 let dragElement = null;
@@ -585,14 +589,18 @@ function createRandomGroups(numGroups) {
     const j = Math.floor(Math.random() * (i + 1));
     [students[i], students[j]] = [students[j], students[i]];
   }
+  // Mantieni oggetti studente (non solo stringhe) per arrangeGroupsOnSeats
   const groups = Array.from({ length: numGroups }, () => []);
   students.forEach((student, idx) => {
-    groups[idx % numGroups].push(student.displayName || student.fullName);
+    groups[idx % numGroups].push(student);
   });
+  _lastGroups = groups;
   let html = '';
   groups.forEach((group, i) => {
-    html += `<div style="margin-bottom:10px;"><strong>Gruppo ${i + 1}:</strong> ${group.join(', ')}</div>`;
+    const names = group.map(s => s.displayName || s.fullName).join(', ');
+    html += `<div style="margin-bottom:10px;"><strong>Gruppo ${i + 1}:</strong> ${names}</div>`;
   });
+  html += _arrangeBtn();
   document.getElementById('groupResults').innerHTML = html;
 }
 
@@ -758,7 +766,24 @@ function _makeHeterogeneous(students, numGroups, gradeMap) {
 
 // ── Render risultati con badge ────────────────────────────────────────────────
 
+/** HTML del bottone "Disponi sui banchi" condiviso da tutti i render */
+function _arrangeBtn() {
+  return `<button
+    onclick="arrangeGroupsOnSeats()"
+    style="margin-top:14px;display:inline-flex;align-items:center;gap:8px;
+      padding:10px 20px;border-radius:20px;border:none;cursor:pointer;font-weight:700;
+      font-size:.95em;background:linear-gradient(135deg,#667eea,#764ba2);color:white;
+      box-shadow:0 4px 12px rgba(102,126,234,.35);transition:transform .2s,box-shadow .2s;"
+    onmouseover="this.style.transform='scale(1.05)'"
+    onmouseout="this.style.transform='scale(1)'">
+    📐 Disponi sui banchi
+  </button>`;
+}
+
 function _renderSmartGroups(groups, gradeMap, strategy) {
+  // Salva i gruppi per arrangeGroupsOnSeats()
+  _lastGroups = groups;
+
   const labels = {
     homogeneous:  '📊 Gruppi Omogenei — stesso livello',
     heterogeneous:'🔀 Gruppi Eterogenei — livelli misti',
@@ -798,7 +823,136 @@ function _renderSmartGroups(groups, gradeMap, strategy) {
     <span>❓ Nessun voto</span>
   </div>`;
 
+  html += _arrangeBtn();
+
   document.getElementById('groupResults').innerHTML = html;
+}
+
+// ── Disponi gruppi sui banchi ─────────────────────────────────────────────────
+
+/**
+ * Assegna ogni gruppo a un cluster di banchi adiacenti nel seating chart.
+ * Algoritmo greedy nearest-neighbor:
+ *   1. Ordina i banchi top-left → bottom-right (selezione del "seme")
+ *   2. Per ogni gruppo, prende il primo banco libero come seme
+ *   3. Espande il cluster aggiungendo sempre il banco libero più vicino
+ *      a qualsiasi banco già nel cluster
+ * Evidenzia i cluster con colori per 4 secondi, poi rimuove l'highlight.
+ */
+function arrangeGroupsOnSeats() {
+  if (!_lastGroups?.length) {
+    alert('Crea prima i gruppi!');
+    return;
+  }
+
+  const chart = document.getElementById('seatingChart');
+  if (!chart) { alert('Nessun layout visibile.'); return; }
+
+  const seatEls = Array.from(chart.querySelectorAll('.student-seat'));
+  if (!seatEls.length) {
+    alert('Nessun banco trovato. Seleziona prima un\'aula per questa classe.');
+    closeModal('groupModal');
+    return;
+  }
+
+  // Build seat pool with positions
+  const ROW_SNAP = 55; // pixel tolerance per raggruppare in righe
+  let pool = seatEls.map(el => ({
+    el,
+    x: parseInt(el.style.left) || 0,
+    y: parseInt(el.style.top)  || 0,
+    assigned: false
+  }));
+
+  // Sort: fila (y arrotondato) poi colonna (x) — per scegliere i semi in ordine naturale
+  pool.sort((a, b) => {
+    const rA = Math.round(a.y / ROW_SNAP);
+    const rB = Math.round(b.y / ROW_SNAP);
+    return rA !== rB ? rA - rB : a.x - b.x;
+  });
+
+  const totalStudents = _lastGroups.flat().length;
+  if (pool.length < totalStudents) {
+    if (!confirm(`⚠️ Banchi insufficienti: ${totalStudents} studenti, ${pool.length} banchi.\nProcedo assegnando quanti più studenti posso. Continuo?`)) return;
+  }
+
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  // Palette colori gruppi
+  const COLORS = [
+    '#667eea','#48bb78','#ed8936','#e53e3e','#9f7aea',
+    '#38b2ac','#d69e2e','#e91e63','#00bcd4','#8bc34a'
+  ];
+
+  const assignedSeats = []; // per rimuovere highlight dopo 4s
+
+  _lastGroups.forEach((group, gIdx) => {
+    if (!group.length) return;
+    const color = COLORS[gIdx % COLORS.length];
+
+    // Seed: primo banco libero nell'ordine naturale
+    const seed = pool.find(s => !s.assigned);
+    if (!seed) return;
+    seed.assigned = true;
+    const cluster = [seed];
+
+    // Espandi il cluster con nearest-neighbor
+    for (let k = 1; k < group.length; k++) {
+      let bestDist = Infinity, bestSeat = null;
+      pool.forEach(s => {
+        if (s.assigned) return;
+        // Distanza dal banco libero al più vicino già nel cluster
+        const d = Math.min(...cluster.map(c => dist(c, s)));
+        if (d < bestDist) { bestDist = d; bestSeat = s; }
+      });
+      if (!bestSeat) break;
+      bestSeat.assigned = true;
+      cluster.push(bestSeat);
+    }
+
+    // Assegna nomi e colora
+    cluster.forEach((seat, sIdx) => {
+      const student = group[sIdx];
+      if (!student) return;
+      const nameEl = seat.el.querySelector('.student-name');
+      if (!nameEl) return;
+
+      const name = student.displayName || student.fullName || student;
+      nameEl.textContent = name;
+      nameEl.dataset.name = name;
+      seat.el.classList.remove('empty');
+
+      // Highlight con colore gruppo
+      seat.el.style.transition = 'border-color .3s, box-shadow .3s';
+      seat.el.style.borderColor = color;
+      seat.el.style.boxShadow   = `0 0 0 3px ${color}66, 0 4px 14px ${color}55`;
+
+      assignedSeats.push(seat.el);
+    });
+  });
+
+  // Svuota i banchi rimasti liberi
+  pool.forEach(s => {
+    if (s.assigned) return;
+    const nameEl = s.el.querySelector('.student-name');
+    if (!nameEl) return;
+    nameEl.textContent = 'Empty';
+    nameEl.dataset.name = '';
+    s.el.classList.add('empty');
+    s.el.style.borderColor = '';
+    s.el.style.boxShadow   = '';
+  });
+
+  // Rimuovi l'highlight dopo 4 secondi
+  setTimeout(() => {
+    assignedSeats.forEach(el => {
+      el.style.borderColor = '';
+      el.style.boxShadow   = '';
+    });
+  }, 4000);
+
+  closeModal('groupModal');
+  showSyncIndicator('📐 Gruppi disposti sui banchi!', false);
 }
 
 // ── Entry point: bottoni del modal ────────────────────────────────────────────
