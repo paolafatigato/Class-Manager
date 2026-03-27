@@ -567,7 +567,7 @@ function selectClassroom(classroomId) {
 
 // ========== CLASSROOM EDITOR ==========
 
-// ========== GRUPPI RANDOMICI ========== 
+// ========== GRUPPI (CASUALI + INTELLIGENTI PER LIVELLO) ==========
 
 function showGroupModal() {
   document.getElementById('groupResults').innerHTML = '';
@@ -580,23 +580,288 @@ function createRandomGroups(numGroups) {
     document.getElementById('groupResults').innerHTML = '<p style="color:red">Nessuno studente nella classe.</p>';
     return;
   }
-  // Copia e mescola gli studenti
   const students = [...cls.students];
   for (let i = students.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [students[i], students[j]] = [students[j], students[i]];
   }
-  // Crea i gruppi
   const groups = Array.from({ length: numGroups }, () => []);
   students.forEach((student, idx) => {
     groups[idx % numGroups].push(student.displayName || student.fullName);
   });
-  // Mostra i risultati
   let html = '';
   groups.forEach((group, i) => {
     html += `<div style="margin-bottom:10px;"><strong>Gruppo ${i + 1}:</strong> ${group.join(', ')}</div>`;
   });
   document.getElementById('groupResults').innerHTML = html;
+}
+
+// ── Lettura voti da Firebase (read-only, nessuna scrittura) ──────────────────
+
+/**
+ * Legge /users/{uid}/grading/ dal database Firebase condiviso.
+ * Usa onlyOnce: true → nessun listener persistente, solo una lettura.
+ * Non scrive nulla, non modifica niente.
+ */
+async function loadGradingData() {
+  if (!window.currentUser || !window.firebaseDb || !window.firebaseRef || !window.firebaseOnValue) {
+    return null;
+  }
+  return new Promise((resolve, reject) => {
+    const ref = window.firebaseRef(window.firebaseDb, `users/${window.currentUser.uid}/grading`);
+    window.firebaseOnValue(
+      ref,
+      (snapshot) => resolve(snapshot.val()),
+      (err) => reject(err),
+      { onlyOnce: true }
+    );
+  });
+}
+
+// ── Calcolo media studente (replica fedele di app.js getStudentAverage) ──────
+
+function _parseNum(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+/**
+ * Calcola il voto finale (0-10) di uno studente per un test, dato il grading snapshot.
+ * fullName è la chiave usata da entrambi i sistemi (es. "Rossi Mario").
+ */
+function _computeFinalScore(studentId, test, gradingScores, gradingTestVersions) {
+  const allScores = gradingScores?.[studentId];
+  if (!allScores || !allScores[test.id]) return null;
+  const testScores = allScores[test.id];
+
+  // Versione assegnata allo studente, o prima disponibile
+  const versionId = gradingTestVersions?.[studentId]?.[test.id];
+  const versions = test.versions || [];
+  const version = (versionId ? versions.find(v => v.id === versionId) : null) || versions[0];
+  if (!version) return null;
+
+  const sections = version.sections || [];
+  let weightedSum = 0;
+  let weightedMaxSum = 0;
+
+  sections.forEach(section => {
+    const sectionScores = testScores[section.id];
+    if (!sectionScores) return;
+
+    const subsections = section.subsections || [];
+    let sectionScore = 0;
+
+    if (subsections.length > 0) {
+      // Calcola totalWeight e totalMax delle sottosezioni
+      let totalWeight = 0, totalMax = 0;
+      subsections.forEach(sub => {
+        totalWeight += _parseNum(sub.weight) ?? 1;
+        totalMax    += _parseNum(sub.max)    ?? 0;
+      });
+      if (totalWeight <= 0 || totalMax <= 0) return;
+
+      const fallbackPerSub = totalMax / subsections.length;
+      let weightedRatioSum = 0;
+      subsections.forEach(sub => {
+        const val = _parseNum(sectionScores.subsections?.[sub.id]) ?? 0;
+        const m   = (_parseNum(sub.max) !== null) ? _parseNum(sub.max) : fallbackPerSub;
+        const w   = _parseNum(sub.weight) ?? 1;
+        if (m > 0 && w > 0) weightedRatioSum += (val / m) * w;
+      });
+      sectionScore = (weightedRatioSum / totalWeight) * totalMax;
+
+      // weight e max della sezione = somma delle sottosezioni
+      const sWeight = subsections.reduce((s, sub) => s + (_parseNum(sub.weight) ?? 1), 0);
+      const sMax    = subsections.reduce((s, sub) => s + (_parseNum(sub.max)    ?? 0), 0);
+      if (sWeight > 0 && sMax > 0) {
+        weightedSum    += sectionScore * sWeight;
+        weightedMaxSum += sMax * sWeight;
+      }
+    } else {
+      // Sezione diretta (senza sottosezioni)
+      sectionScore = _parseNum(sectionScores.direct) ?? 0;
+      const sWeight = _parseNum(section.weight) ?? 1;
+      const sMax    = _parseNum(section.max)    ?? 0;
+      if (sWeight > 0 && sMax > 0) {
+        weightedSum    += sectionScore * sWeight;
+        weightedMaxSum += sMax * sWeight;
+      }
+    }
+  });
+
+  if (weightedMaxSum === 0) return null;
+  return (weightedSum * 10) / weightedMaxSum;
+}
+
+/**
+ * Calcola la media generale (0-10) di uno studente su tutti i test.
+ * Esclude voti <= 2 (assenti/non svolti), come fa app.js.
+ */
+function computeStudentAverage(fullName, gradingData) {
+  if (!gradingData?.tests || !gradingData?.scores) return null;
+  if (!gradingData.scores[fullName]) return null; // nessun voto registrato
+
+  const finals = gradingData.tests
+    .map(test => _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions))
+    .filter(v => v !== null && v > 2);
+
+  if (finals.length === 0) return null;
+  return finals.reduce((a, b) => a + b, 0) / finals.length;
+}
+
+// ── Badge colore per livello ──────────────────────────────────────────────────
+
+function _gradeLevel(avg) {
+  if (avg === null || avg === undefined) return { emoji: '❓', color: '#9e9e9e', label: '—' };
+  if (avg >= 8.5) return { emoji: '🟢', color: '#2e7d32', label: avg.toFixed(1) };
+  if (avg >= 7)   return { emoji: '🟩', color: '#388e3c', label: avg.toFixed(1) };
+  if (avg >= 6)   return { emoji: '🟡', color: '#f57f17', label: avg.toFixed(1) };
+  return             { emoji: '🔴', color: '#c62828', label: avg.toFixed(1) };
+}
+
+// ── Algoritmi di raggruppamento ───────────────────────────────────────────────
+
+/**
+ * Gruppi OMOGENEI: stessi livelli insieme.
+ * Ordina per voto decrescente, poi distribuisce in blocchi consecutivi.
+ */
+function _makeHomogeneous(students, numGroups, gradeMap) {
+  const sorted = [...students].sort((a, b) => {
+    const ga = gradeMap[a.fullName] ?? -1;
+    const gb = gradeMap[b.fullName] ?? -1;
+    return gb - ga;
+  });
+  const size = Math.ceil(sorted.length / numGroups);
+  const groups = [];
+  for (let i = 0; i < sorted.length; i += size) {
+    groups.push(sorted.slice(i, i + size));
+  }
+  return groups;
+}
+
+/**
+ * Gruppi ETEROGENEI: livelli misti.
+ * Ordina per voto, poi distribuisce a round-robin → ogni gruppo riceve
+ * almeno uno studente per fascia.
+ */
+function _makeHeterogeneous(students, numGroups, gradeMap) {
+  const sorted = [...students].sort((a, b) => {
+    const ga = gradeMap[a.fullName] ?? -1;
+    const gb = gradeMap[b.fullName] ?? -1;
+    return gb - ga;
+  });
+  const groups = Array.from({ length: numGroups }, () => []);
+  sorted.forEach((s, i) => groups[i % numGroups].push(s));
+  return groups.filter(g => g.length > 0);
+}
+
+// ── Render risultati con badge ────────────────────────────────────────────────
+
+function _renderSmartGroups(groups, gradeMap, strategy) {
+  const labels = {
+    homogeneous:  '📊 Gruppi Omogenei — stesso livello',
+    heterogeneous:'🔀 Gruppi Eterogenei — livelli misti',
+  };
+  let html = `<p style="font-size:.85em;color:#667eea;margin-bottom:10px;font-weight:600;">
+    ${labels[strategy] || strategy}
+  </p>`;
+
+  groups.forEach((group, i) => {
+    html += `<div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;
+      background:#f7fafc;border:1.5px solid #e2e8f0;">
+      <strong style="color:#764ba2;font-size:.95em;">Gruppo ${i + 1}</strong>
+      <div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:6px;">`;
+
+    group.forEach(s => {
+      const avg = gradeMap[s.fullName];
+      const lv  = _gradeLevel(avg);
+      html += `<span style="display:inline-flex;align-items:center;gap:4px;
+        padding:3px 9px;border-radius:20px;background:white;
+        border:2px solid ${lv.color};font-size:.85em;white-space:nowrap;">
+        <span>${lv.emoji}</span>
+        <span style="font-weight:600;">${s.displayName || s.fullName}</span>
+        <span style="color:${lv.color};font-weight:700;">${lv.label}</span>
+      </span>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  // Legenda
+  html += `<div style="margin-top:12px;font-size:.78em;color:#888;
+    display:flex;gap:12px;flex-wrap:wrap;padding-top:8px;border-top:1px solid #eee;">
+    <span>🟢 Ottimo ≥8.5</span>
+    <span>🟩 Buono ≥7</span>
+    <span>🟡 Sufficiente ≥6</span>
+    <span>🔴 Insufficiente &lt;6</span>
+    <span>❓ Nessun voto</span>
+  </div>`;
+
+  document.getElementById('groupResults').innerHTML = html;
+}
+
+// ── Entry point: bottoni del modal ────────────────────────────────────────────
+
+async function createSmartGroupsFromInput() {
+  const strategy = document.getElementById('groupStrategySelect')?.value || 'random';
+  if (strategy === 'random') { createRandomGroupsFromInput(); return; }
+
+  const numGroups = Math.max(2, parseInt(document.getElementById('numGroupsInput').value) || 2);
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls?.students?.length) {
+    document.getElementById('groupResults').innerHTML = '<p style="color:red">Nessuno studente nella classe.</p>';
+    return;
+  }
+
+  document.getElementById('groupResults').innerHTML =
+    '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
+
+  try {
+    const gradingData = await loadGradingData();
+    const gradeMap = {};
+    cls.students.forEach(s => {
+      gradeMap[s.fullName] = computeStudentAverage(s.fullName, gradingData);
+    });
+    const groups = strategy === 'homogeneous'
+      ? _makeHomogeneous(cls.students, numGroups, gradeMap)
+      : _makeHeterogeneous(cls.students, numGroups, gradeMap);
+    _renderSmartGroups(groups, gradeMap, strategy);
+  } catch (e) {
+    document.getElementById('groupResults').innerHTML =
+      `<p style="color:red">⚠️ Errore caricamento voti: ${e.message}</p>`;
+  }
+}
+
+async function createSmartGroupsBySize() {
+  const strategy = document.getElementById('groupStrategySelect')?.value || 'random';
+  if (strategy === 'random') { createRandomGroupsBySize(); return; }
+
+  const size = Math.max(2, parseInt(document.getElementById('numPerGroupInput').value) || 4);
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls?.students?.length) {
+    document.getElementById('groupResults').innerHTML = '<p style="color:red">Nessuno studente nella classe.</p>';
+    return;
+  }
+
+  const numGroups = Math.ceil(cls.students.length / size);
+  document.getElementById('groupResults').innerHTML =
+    '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
+
+  try {
+    const gradingData = await loadGradingData();
+    const gradeMap = {};
+    cls.students.forEach(s => {
+      gradeMap[s.fullName] = computeStudentAverage(s.fullName, gradingData);
+    });
+    const groups = strategy === 'homogeneous'
+      ? _makeHomogeneous(cls.students, numGroups, gradeMap)
+      : _makeHeterogeneous(cls.students, numGroups, gradeMap);
+    _renderSmartGroups(groups, gradeMap, strategy);
+  } catch (e) {
+    document.getElementById('groupResults').innerHTML =
+      `<p style="color:red">⚠️ Errore caricamento voti: ${e.message}</p>`;
+  }
 }
 function openClassroomEditor(classroomId) {
   currentClassroomId = classroomId;

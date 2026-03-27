@@ -23,7 +23,7 @@
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
           </svg>
           Sign in with Google
         </button>
@@ -104,22 +104,22 @@
     </div>
   </div>
 
-  <!-- Add Class Modal -->
-    <!-- Student List Modal -->
-    <div class="modal" id="studentListModal">
-      <div class="modal-content" style="max-width: 500px;">
-        <h2>👥 Student List</h2>
-        <div style="margin-bottom: 10px; text-align: right;">
-          <button class="btn btn-small btn-secondary" id="addStudentBtn">+ Add Student</button>
-        </div>
-        <div id="studentTableContainer"></div>
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-          <button class="btn" id="saveStudentListBtn">Save</button>
-          <button class="btn btn-danger" onclick="closeModal('studentListModal')">Cancel</button>
-        </div>
+  <!-- Student List Modal -->
+  <div class="modal" id="studentListModal">
+    <div class="modal-content" style="max-width: 500px;">
+      <h2>👥 Student List</h2>
+      <div style="margin-bottom: 10px; text-align: right;">
+        <button class="btn btn-small btn-secondary" id="addStudentBtn">+ Add Student</button>
+      </div>
+      <div id="studentTableContainer"></div>
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn" id="saveStudentListBtn">Save</button>
+        <button class="btn btn-danger" onclick="closeModal('studentListModal')">Cancel</button>
       </div>
     </div>
+  </div>
 
+  <!-- Add Class Modal -->
   <div class="modal" id="addClassModal">
     <div class="modal-content">
       <h2>Add New Class</h2>
@@ -184,22 +184,38 @@
 
   <!-- Group Modal -->
   <div class="modal" id="groupModal">
-    <div class="modal-content">
-      <h2>👫 Crea Gruppi Randomici</h2>
-      <div style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px;">
-        <div>
-          <label for="numGroupsInput">Numero di gruppi:</label>
-          <input type="number" id="numGroupsInput" min="2" max="50" value="2" style="width:60px; margin-left:10px;">
-          <button class="btn" onclick="createRandomGroupsFromInput()">Crea Gruppi</button>
+    <div class="modal-content" style="max-width:620px;">
+      <h2>👫 Crea Gruppi</h2>
+
+      <!-- Strategia -->
+      <div style="margin-bottom:18px;padding:14px 16px;background:#f0f4ff;border-radius:12px;border:1.5px solid #c9d3f7;">
+        <label style="font-weight:700;color:#667eea;display:block;margin-bottom:8px;">📊 Strategia di raggruppamento</label>
+        <select id="groupStrategySelect" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+          <option value="random">🎲 Casuale (randomico)</option>
+          <option value="heterogeneous">🔀 Eterogeneo — livelli misti (il più efficace didatticamente)</option>
+          <option value="homogeneous">📊 Omogeneo — stesso livello insieme</option>
+        </select>
+        <p style="font-size:.8em;color:#764ba2;margin-top:8px;margin-bottom:0;">
+          Le strategie per livello leggono i voti dal tuo Registro in automatico 🎓
+        </p>
+      </div>
+
+      <!-- Controlli -->
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="numGroupsInput" style="min-width:160px;">Numero di gruppi:</label>
+          <input type="number" id="numGroupsInput" min="2" max="50" value="2" style="width:60px;">
+          <button class="btn" onclick="createSmartGroupsFromInput()">Crea Gruppi</button>
         </div>
-        <div>
-          <label for="numPerGroupInput">Persone per gruppo:</label>
-          <input type="number" id="numPerGroupInput" min="2" max="50" value="4" style="width:60px; margin-left:10px;">
-          <button class="btn" onclick="createRandomGroupsBySize()">Crea Gruppi da N</button>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="numPerGroupInput" style="min-width:160px;">Persone per gruppo:</label>
+          <input type="number" id="numPerGroupInput" min="2" max="50" value="4" style="width:60px;">
+          <button class="btn" onclick="createSmartGroupsBySize()">Crea Gruppi da N</button>
         </div>
       </div>
+
       <div id="groupResults"></div>
-      <button class="btn btn-danger" onclick="closeModal('groupModal')">Chiudi</button>
+      <button class="btn btn-danger" style="margin-top:16px;" onclick="closeModal('groupModal')">Chiudi</button>
     </div>
   </div>
 
@@ -209,7 +225,6 @@
     import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-    // Your Firebase configuration
     const firebaseConfig = {
       apiKey: "AIzaSyA6O12KFRkZ4gGBi2LEGKZni33c3a2NBcU",
       authDomain: "classroomanager.firebaseapp.com",
@@ -220,20 +235,17 @@
       appId: "1:995055049853:web:5b3674ae12f7c0b504e514"
     };
 
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getDatabase(app);
     const provider = new GoogleAuthProvider();
 
-    // Make Firebase available globally
     window.firebaseAuth = auth;
     window.firebaseDb = db;
     window.firebaseRef = ref;
     window.firebaseSet = set;
     window.firebaseOnValue = onValue;
 
-    // Google Sign In
     document.getElementById('googleSignInBtn').addEventListener('click', async () => {
       try {
         document.getElementById('loginError').textContent = '';
@@ -247,7 +259,6 @@
       }
     });
 
-    // Logout
     document.getElementById('logoutBtn').addEventListener('click', async () => {
       try {
         await signOut(auth);
@@ -256,7 +267,6 @@
       }
     });
 
-    // Auth state listener
     onAuthStateChanged(auth, (user) => {
       if (user) {
         window.currentUser = user;
