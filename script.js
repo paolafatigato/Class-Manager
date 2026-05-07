@@ -749,9 +749,12 @@ function _makeHomogeneous(students, numGroups, gradeMap) {
 }
 
 /**
- * Gruppi ETEROGENEI: livelli misti.
- * Ordina per voto, poi distribuisce a round-robin → ogni gruppo riceve
- * almeno uno studente per fascia.
+ * Gruppi ETEROGENEI: livelli misti con variazione ad ogni chiamata.
+ * 1. Ordina per voto e divide in "livelli" di numGroups studenti ciascuno
+ *    (es. 26 studenti, 13 gruppi → livello alto: i 13 migliori, livello basso: i 13 peggiori).
+ * 2. Mescola casualmente ogni livello → risultato diverso ad ogni click.
+ * 3. Assegna livello[t][i] → gruppo[i]: ogni gruppo riceve uno studente per livello
+ *    → nessun gruppo con soli bravissimi né soli scarsissimi.
  */
 function _makeHeterogeneous(students, numGroups, gradeMap) {
   const sorted = [...students].sort((a, b) => {
@@ -759,8 +762,25 @@ function _makeHeterogeneous(students, numGroups, gradeMap) {
     const gb = gradeMap[b.fullName] ?? -1;
     return gb - ga;
   });
+
+  // Taglia in livelli di numGroups studenti (uno slot per gruppo)
+  const tiers = [];
+  for (let i = 0; i < sorted.length; i += numGroups) {
+    const tier = sorted.slice(i, i + numGroups);
+    // Fisher-Yates shuffle dentro ogni livello
+    for (let j = tier.length - 1; j > 0; j--) {
+      const k = Math.floor(Math.random() * (j + 1));
+      [tier[j], tier[k]] = [tier[k], tier[j]];
+    }
+    tiers.push(tier);
+  }
+
+  // tier[t][i] → gruppo[i]: ogni gruppo riceve un rappresentante per livello
   const groups = Array.from({ length: numGroups }, () => []);
-  sorted.forEach((s, i) => groups[i % numGroups].push(s));
+  tiers.forEach(tier => {
+    tier.forEach((s, i) => groups[i].push(s));
+  });
+
   return groups.filter(g => g.length > 0);
 }
 
