@@ -1110,11 +1110,23 @@ function _renderSmartGroups(groups, gradeMap, strategy) {
 
 /**
  * Assegna ogni gruppo a un cluster di banchi adiacenti nel seating chart.
- * Algoritmo greedy nearest-neighbor:
+ * Algoritmo greedy nearest-neighbor "adjacency-aware":
  *   1. Ordina i banchi top-left → bottom-right (selezione del "seme")
  *   2. Per ogni gruppo, prende il primo banco libero come seme
- *   3. Espande il cluster aggiungendo sempre il banco libero più vicino
- *      a qualsiasi banco già nel cluster
+ *   3. Espande il cluster aggiungendo il banco libero con il COSTO minore
+ *      rispetto a un qualsiasi banco già nel cluster, dove il costo
+ *      NON è la semplice distanza euclidea centro-centro, ma tiene conto
+ *      di come i banchi sono fisicamente disposti:
+ *        • banchi ACCANTO che si toccano (stessa fila, bordi quasi a contatto)
+ *          → costo minimo assoluto: sono trattati come un "banco doppio"
+ *            e vengono sempre raggruppati per primi
+ *        • banchi che si toccano in colonna (uno davanti, uno dietro)
+ *          → nessun bonus: contano per la loro reale distanza, così un
+ *            vicino di banco "accanto" viene sempre preferito a un vicino
+ *            "avanti/dietro" anche se quest'ultimo è geometricamente più
+ *            vicino al centro (è il bug segnalato: prima l'algoritmo
+ *            confondeva vicinanza del centro con vicinanza fisica reale)
+ *        • tutti gli altri banchi → normale distanza euclidea
  * Evidenzia i cluster con colori per 4 secondi, poi rimuove l'highlight.
  */
 function arrangeGroupsOnSeats() {
@@ -1133,12 +1145,14 @@ function arrangeGroupsOnSeats() {
     return;
   }
 
-  // Build seat pool with positions
+  // Build seat pool with positions (+ dimensioni reali per capire l'adiacenza fisica)
   const ROW_SNAP = 55; // pixel tolerance per raggruppare in righe
   let pool = seatEls.map(el => ({
     el,
     x: parseInt(el.style.left) || 0,
     y: parseInt(el.style.top)  || 0,
+    w: el.offsetWidth  || 120, // larghezza reale del banco (fallback al default CSS)
+    h: el.offsetHeight || 80,  // altezza reale del banco
     assigned: false
   }));
 
@@ -1154,7 +1168,30 @@ function arrangeGroupsOnSeats() {
     if (!confirm(`⚠️ Banchi insufficienti: ${totalStudents} studenti, ${pool.length} banchi.\nProcedo assegnando quanti più studenti posso. Continuo?`)) return;
   }
 
-  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  // ── Adiacenza fisica reale tra due banchi ─────────────────────────────────
+  // Due banchi sono "accanto" (stesso banco doppio) solo se sono nella stessa
+  // fila (le loro altezze si sovrappongono per più della metà) E il varco
+  // orizzontale tra i bordi è piccolo, sotto SIDE_TOUCH_GAP. La soglia è
+  // proporzionale alla dimensione del banco così funziona a qualunque scala/zoom.
+  const SIDE_TOUCH_GAP = Math.min(pool[0]?.w || 120, pool[0]?.h || 80) * 0.3;
+
+  function isSideBySide(a, b) {
+    const vOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    if (vOverlap < Math.min(a.h, b.h) * 0.5) return false; // non sono nella stessa fila
+    const hGap = Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w);
+    return hGap <= SIDE_TOUCH_GAP; // bordi quasi a contatto → banchi veri "accanto"
+  }
+
+  // Costo di vicinanza usato dal nearest-neighbor: i banchi realmente accanto
+  // ottengono un costo drasticamente ridotto, così vincono sempre il confronto
+  // anche contro un banco davanti/dietro geometricamente più vicino al centro.
+  const neighborCost = (a, b) => {
+    const centerDist = Math.hypot(
+      (a.x + a.w / 2) - (b.x + b.w / 2),
+      (a.y + a.h / 2) - (b.y + b.h / 2)
+    );
+    return isSideBySide(a, b) ? centerDist * 0.01 : centerDist;
+  };
 
   // Palette colori gruppi
   const COLORS = [
@@ -1174,14 +1211,15 @@ function arrangeGroupsOnSeats() {
     seed.assigned = true;
     const cluster = [seed];
 
-    // Espandi il cluster con nearest-neighbor
+    // Espandi il cluster con nearest-neighbor "adjacency-aware"
     for (let k = 1; k < group.length; k++) {
-      let bestDist = Infinity, bestSeat = null;
+      let bestCost = Infinity, bestSeat = null;
       pool.forEach(s => {
         if (s.assigned) return;
-        // Distanza dal banco libero al più vicino già nel cluster
-        const d = Math.min(...cluster.map(c => dist(c, s)));
-        if (d < bestDist) { bestDist = d; bestSeat = s; }
+        // Costo dal banco libero al più vicino già nel cluster
+        // (banchi accanto = quasi gratis, il resto = distanza reale)
+        const c = Math.min(...cluster.map(seat => neighborCost(seat, s)));
+        if (c < bestCost) { bestCost = c; bestSeat = s; }
       });
       if (!bestSeat) break;
       bestSeat.assigned = true;
