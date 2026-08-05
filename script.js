@@ -519,9 +519,25 @@ async function startNewSchoolYear() {
         .map(c => ({ ...c, archivedAt, schoolYearLabel })),
     ];
 
+    // Anno (1/2/3...) di ogni classe PRIMA della promozione: serve per sapere,
+    // in Teacher Registro, a quale anno appartenevano le verifiche archiviate
+    // (per raggrupparle nel selettore "riusa da archiviata").
+    const classYearById = {};
+    freshClasses.forEach(c => {
+      const yn = parseClassYearNumber(c.name);
+      if (yn) classYearById[c.id] = yn;
+    });
+
     const newArchivedTests = [
       ...existingArchivedTests,
-      ...currentTests.map(t => ({ ...t, archivedAt, schoolYearLabel })),
+      ...currentTests.map(t => {
+        const yearLevels = Array.from(new Set(
+          (t.classIds || [])
+            .map(cid => classYearById[cid])
+            .filter(Boolean)
+        )).sort((a, b) => a - b);
+        return { ...t, archivedAt, schoolYearLabel, yearLevels };
+      }),
     ];
 
     // update() con percorsi multipli: tocca solo classes, archivedClasses e i
