@@ -833,7 +833,37 @@ function selectClassroom(classroomId) {
 
 function showGroupModal() {
   document.getElementById('groupResults').innerHTML = '';
+  _gradingDataPromise = null; // forza rilettura fresca dei voti ad ogni apertura
+  const strategySelect = document.getElementById('groupStrategySelect');
+  const basisSelect = document.getElementById('groupBasisSelect');
+  if (strategySelect) strategySelect.value = 'random';
+  if (basisSelect) basisSelect.value = 'average';
+  document.getElementById('groupBasisBox').style.display = 'none';
+  document.getElementById('groupTestBox').style.display = 'none';
   document.getElementById('groupModal').classList.add('active');
+}
+
+/** Mostra/nasconde il box "Base di calcolo" in base alla strategia scelta. */
+function onGroupStrategyChange() {
+  const strategy = document.getElementById('groupStrategySelect')?.value || 'random';
+  const basisBox = document.getElementById('groupBasisBox');
+  const isLevelBased = strategy === 'homogeneous' || strategy === 'heterogeneous';
+  basisBox.style.display = isLevelBased ? 'block' : 'none';
+  if (isLevelBased) {
+    onGroupBasisChange(); // aggiorna anche l'eventuale select delle verifiche
+  }
+}
+
+/** Mostra/nasconde il selettore della verifica specifica e ne popola le opzioni. */
+function onGroupBasisChange() {
+  const basis = document.getElementById('groupBasisSelect')?.value || 'average';
+  const testBox = document.getElementById('groupTestBox');
+  if (basis !== 'specific') {
+    testBox.style.display = 'none';
+    return;
+  }
+  testBox.style.display = 'block';
+  _populateGroupTestSelect();
 }
 
 function createRandomGroups(numGroups) {
@@ -976,6 +1006,86 @@ function computeStudentAverage(fullName, gradingData) {
   return finals.reduce((a, b) => a + b, 0) / finals.length;
 }
 
+/**
+ * Calcola il voto (0-10) di uno studente su UNA specifica verifica.
+ * Stessa esclusione di computeStudentAverage: voti <= 2 (assenti/non svolti) → null.
+ */
+function computeStudentScoreForTest(fullName, testId, gradingData) {
+  if (!gradingData?.tests || !gradingData?.scores || !testId) return null;
+  if (!gradingData.scores[fullName]) return null;
+  const test = gradingData.tests.find(t => t.id === testId);
+  if (!test) return null;
+  const score = _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions);
+  return (score !== null && score > 2) ? score : null;
+}
+
+// ── Cache voti Firebase (evita letture ripetute durante la stessa sessione del modal) ─
+
+let _gradingDataPromise = null;
+
+function _getGradingData() {
+  if (!_gradingDataPromise) {
+    _gradingDataPromise = loadGradingData();
+  }
+  return _gradingDataPromise;
+}
+
+/**
+ * Popola il <select id="groupTestSelect"> con le verifiche che hanno almeno
+ * un voto per la classe corrente, così l'insegnante può scegliere su quale
+ * verifica basare i gruppi (es. per un lavoro/progetto specifico).
+ */
+async function _populateGroupTestSelect() {
+  const select = document.getElementById('groupTestSelect');
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!select || !cls?.students?.length) return;
+
+  select.innerHTML = '<option value="">⏳ Caricamento verifiche…</option>';
+  try {
+    const gradingData = await _getGradingData();
+    const tests = (gradingData?.tests || []).filter(test =>
+      cls.students.some(s =>
+        _computeFinalScore(s.fullName, test, gradingData.scores, gradingData.testVersions) !== null
+      )
+    );
+
+    if (tests.length === 0) {
+      select.innerHTML = '<option value="">Nessuna verifica con voti per questa classe</option>';
+      return;
+    }
+
+    select.innerHTML = tests
+      .map(t => `<option value="${t.id}">${(t.title || 'Verifica senza titolo').replace(/</g, '&lt;')}</option>`)
+      .join('');
+  } catch (e) {
+    select.innerHTML = '<option value="">⚠️ Errore caricamento verifiche</option>';
+  }
+}
+
+/**
+ * Costruisce la mappa {fullName -> voto} da usare per il raggruppamento,
+ * in base alla scelta "Media di tutte le verifiche" oppure "Verifica specifica".
+ * Ritorna anche un'etichetta descrittiva per il render.
+ */
+function _buildGradeMap(cls, gradingData) {
+  const basis = document.getElementById('groupBasisSelect')?.value || 'average';
+  const gradeMap = {};
+
+  if (basis === 'specific') {
+    const testId = document.getElementById('groupTestSelect')?.value || '';
+    const test = gradingData?.tests?.find(t => t.id === testId);
+    cls.students.forEach(s => {
+      gradeMap[s.fullName] = computeStudentScoreForTest(s.fullName, testId, gradingData);
+    });
+    return { gradeMap, basisLabel: test ? `verifica "${test.title || 'senza titolo'}"` : 'verifica specifica' };
+  }
+
+  cls.students.forEach(s => {
+    gradeMap[s.fullName] = computeStudentAverage(s.fullName, gradingData);
+  });
+  return { gradeMap, basisLabel: 'media di tutte le verifiche' };
+}
+
 // ── Badge colore per livello ──────────────────────────────────────────────────
 
 function _gradeLevel(avg) {
@@ -1058,7 +1168,7 @@ function _arrangeBtn() {
   </button>`;
 }
 
-function _renderSmartGroups(groups, gradeMap, strategy) {
+function _renderSmartGroups(groups, gradeMap, strategy, basisLabel) {
   // Salva i gruppi per arrangeGroupsOnSeats()
   _lastGroups = groups;
 
@@ -1066,9 +1176,12 @@ function _renderSmartGroups(groups, gradeMap, strategy) {
     homogeneous:  '📊 Gruppi Omogenei — stesso livello',
     heterogeneous:'🔀 Gruppi Eterogenei — livelli misti',
   };
-  let html = `<p style="font-size:.85em;color:#667eea;margin-bottom:10px;font-weight:600;">
+  let html = `<p style="font-size:.85em;color:#667eea;margin-bottom:2px;font-weight:600;">
     ${labels[strategy] || strategy}
   </p>`;
+  if (basisLabel) {
+    html += `<p style="font-size:.78em;color:#888;margin-bottom:10px;">📐 Basato su: ${basisLabel}</p>`;
+  }
 
   groups.forEach((group, i) => {
     html += `<div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;
@@ -1273,6 +1386,15 @@ function arrangeGroupsOnSeats() {
 
 // ── Entry point: bottoni del modal ────────────────────────────────────────────
 
+/** Ritorna un messaggio di errore se manca la selezione della verifica specifica, altrimenti null. */
+function _validateGroupBasis() {
+  const basis = document.getElementById('groupBasisSelect')?.value || 'average';
+  if (basis !== 'specific') return null;
+  const testId = document.getElementById('groupTestSelect')?.value;
+  if (!testId) return '<p style="color:red">Seleziona prima una verifica specifica su cui basare i gruppi.</p>';
+  return null;
+}
+
 async function createSmartGroupsFromInput() {
   const strategy = document.getElementById('groupStrategySelect')?.value || 'random';
   if (strategy === 'random') { createRandomGroupsFromInput(); return; }
@@ -1283,20 +1405,22 @@ async function createSmartGroupsFromInput() {
     document.getElementById('groupResults').innerHTML = '<p style="color:red">Nessuno studente nella classe.</p>';
     return;
   }
+  const basisError = _validateGroupBasis();
+  if (basisError) {
+    document.getElementById('groupResults').innerHTML = basisError;
+    return;
+  }
 
   document.getElementById('groupResults').innerHTML =
     '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
 
   try {
-    const gradingData = await loadGradingData();
-    const gradeMap = {};
-    cls.students.forEach(s => {
-      gradeMap[s.fullName] = computeStudentAverage(s.fullName, gradingData);
-    });
+    const gradingData = await _getGradingData();
+    const { gradeMap, basisLabel } = _buildGradeMap(cls, gradingData);
     const groups = strategy === 'homogeneous'
       ? _makeHomogeneous(cls.students, numGroups, gradeMap)
       : _makeHeterogeneous(cls.students, numGroups, gradeMap);
-    _renderSmartGroups(groups, gradeMap, strategy);
+    _renderSmartGroups(groups, gradeMap, strategy, basisLabel);
   } catch (e) {
     document.getElementById('groupResults').innerHTML =
       `<p style="color:red">⚠️ Errore caricamento voti: ${e.message}</p>`;
@@ -1314,20 +1438,23 @@ async function createSmartGroupsBySize() {
     return;
   }
 
+  const basisError = _validateGroupBasis();
+  if (basisError) {
+    document.getElementById('groupResults').innerHTML = basisError;
+    return;
+  }
+
   const numGroups = Math.ceil(cls.students.length / size);
   document.getElementById('groupResults').innerHTML =
     '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
 
   try {
-    const gradingData = await loadGradingData();
-    const gradeMap = {};
-    cls.students.forEach(s => {
-      gradeMap[s.fullName] = computeStudentAverage(s.fullName, gradingData);
-    });
+    const gradingData = await _getGradingData();
+    const { gradeMap, basisLabel } = _buildGradeMap(cls, gradingData);
     const groups = strategy === 'homogeneous'
       ? _makeHomogeneous(cls.students, numGroups, gradeMap)
       : _makeHeterogeneous(cls.students, numGroups, gradeMap);
-    _renderSmartGroups(groups, gradeMap, strategy);
+    _renderSmartGroups(groups, gradeMap, strategy, basisLabel);
   } catch (e) {
     document.getElementById('groupResults').innerHTML =
       `<p style="color:red">⚠️ Errore caricamento voti: ${e.message}</p>`;

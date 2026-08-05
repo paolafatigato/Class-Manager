@@ -203,7 +203,7 @@
       <!-- Strategia -->
       <div style="margin-bottom:18px;padding:14px 16px;background:#f0f4ff;border-radius:12px;border:1.5px solid #c9d3f7;">
         <label style="font-weight:700;color:#667eea;display:block;margin-bottom:8px;">📊 Strategia di raggruppamento</label>
-        <select id="groupStrategySelect" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+        <select id="groupStrategySelect" onchange="onGroupStrategyChange()" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
           <option value="random">🎲 Casuale (randomico)</option>
           <option value="heterogeneous">🔀 Eterogeneo — livelli misti (il più efficace didatticamente)</option>
           <option value="homogeneous">📊 Omogeneo — stesso livello insieme</option>
@@ -211,6 +211,24 @@
         <p style="font-size:.8em;color:#764ba2;margin-top:8px;margin-bottom:0;">
           Le strategie per livello leggono i voti dal tuo Registro in automatico 🎓
         </p>
+
+        <!-- Base di calcolo (solo per strategie per livello) -->
+        <div id="groupBasisBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #c9d3f7;">
+          <label style="font-weight:700;color:#667eea;display:block;margin-bottom:8px;">📐 Base di calcolo del livello</label>
+          <select id="groupBasisSelect" onchange="onGroupBasisChange()" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+            <option value="average">📈 Media di tutte le verifiche</option>
+            <option value="specific">🎯 Una verifica specifica</option>
+          </select>
+
+          <div id="groupTestBox" style="display:none;margin-top:10px;">
+            <select id="groupTestSelect" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+              <option value="">⏳ Caricamento verifiche…</option>
+            </select>
+            <p style="font-size:.78em;color:#888;margin-top:6px;margin-bottom:0;">
+              Utile per creare gruppi eterogenei su un lavoro specifico, basandoti solo su quella verifica 🎯
+            </p>
+          </div>
+        </div>
       </div>
 
       <!-- Controlli -->
