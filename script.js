@@ -150,6 +150,16 @@ document.addEventListener('DOMContentLoaded', function() {
       window.open('https://paolafatigato.github.io/RegistroTeacher/', '_blank');
     });
   }
+  const newYearBtn = document.getElementById('newYearBtn');
+  if (newYearBtn) {
+    newYearBtn.addEventListener('click', startNewSchoolYear);
+  }
+  const schoolYearsCountSelect = document.getElementById('schoolYearsCountSelect');
+  if (schoolYearsCountSelect) {
+    schoolYearsCountSelect.addEventListener('change', (e) => {
+      saveSchoolYearsCount(parseInt(e.target.value, 10) || 3);
+    });
+  }
 });
 function createRandomGroupsBySize() {
   const input = document.getElementById('numPerGroupInput');
@@ -194,6 +204,10 @@ let currentClassId = null;
 // Colori delle classi: arrivano da Teacher Registro (users/{uid}/grading/settings/classColors)
 // Qui sono SOLO lettura: chi li imposta è Teacher Registro, Classroom Manager li mostra soltanto.
 let classColors = {};
+// Numero di anni del ciclo scolastico (3 = medie, 5 = superiori, ...): determina
+// a quale numero le classi vengono archiviate invece che promosse. Impostato
+// dal docente, salvato su users/{uid}/settings/schoolYearsCount.
+let schoolYearsCount = 3;
 
 // Deep-link da Teacher Registro: es. ?classId=123 oppure ?classId=123&action=students
 // Serve per "portare l'utente su Classroom Manager" già sulla classe/azione giusta,
@@ -268,6 +282,27 @@ function showSyncIndicator(message, isSaving = false) {
   setTimeout(() => indicator.classList.remove('show'), 2000);
 }
 
+/** Aggiorna il valore mostrato nel selettore "Anni scuola" in base a schoolYearsCount. */
+function updateSchoolYearsCountSelect() {
+  const select = document.getElementById('schoolYearsCountSelect');
+  if (!select) return;
+  select.value = String(schoolYearsCount);
+}
+
+/** Salva su Firebase il numero di anni scelto dal docente (users/{uid}/settings/schoolYearsCount). */
+async function saveSchoolYearsCount(value) {
+  schoolYearsCount = value;
+  if (!window.currentUser || !window.firebaseDb || !window.firebaseRef || !window.firebaseUpdate) return;
+  try {
+    const userRef = window.firebaseRef(window.firebaseDb, 'users/' + window.currentUser.uid);
+    await window.firebaseUpdate(userRef, { 'settings/schoolYearsCount': value });
+    showSyncIndicator('✓ Anni scuola aggiornati');
+  } catch (error) {
+    console.error('Errore salvataggio anni scuola:', error);
+    showSyncIndicator('❌ Errore salvataggio', false);
+  }
+}
+
 // ========== FIREBASE DATA FUNCTIONS ==========
 
 /**
@@ -323,14 +358,19 @@ function loadUserData(userId) {
       // users/{uid}/grading/settings/classColors: li leggiamo qui in sola lettura,
       // dallo stesso nodo utente già osservato, così restano sempre allineati.
       classColors = (data.grading && data.grading.settings && data.grading.settings.classColors) || {};
+      // Numero di anni della scuola (3 = medie, 5 = superiori...): impostazione
+      // propria di Classroom Manager, in users/{uid}/settings/schoolYearsCount.
+      schoolYearsCount = (data.settings && Number(data.settings.schoolYearsCount)) || 3;
     } else {
       classes = [];
       classrooms = [];
       classColors = {};
+      schoolYearsCount = 3;
     }
     
     renderClassList();
     renderClassroomList();
+    updateSchoolYearsCountSelect();
     showLoading(false);
     handleDeepLinkAfterLoad();
   }, (error) => {
@@ -360,6 +400,148 @@ async function saveToFirebase() {
   } catch (error) {
     console.error('Error saving:', error);
     showSyncIndicator('❌ Save failed', false);
+  }
+}
+
+// ========== INIZIO ANNO NUOVO ==========
+
+/**
+ * Legge il numero iniziale nel nome di una classe (es. "1A" -> 1, "2 B" -> 2).
+ * Ritorna null se il nome non inizia con un numero.
+ */
+function parseClassYearNumber(name) {
+  const match = /^\s*(\d+)/.exec(name || '');
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/** Sostituisce SOLO il numero iniziale del nome classe, lasciando il resto invariato. */
+function promoteClassName(name, newYearNumber) {
+  return (name || '').replace(/^(\s*)(\d+)/, `$1${newYearNumber}`);
+}
+
+/** Etichetta anno scolastico corrente, es. "2026/2027". */
+function computeSchoolYearLabel() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const startYear = now.getMonth() >= 7 ? y : y - 1; // da agosto in poi = inizio nuovo anno
+  return `${startYear}/${startYear + 1}`;
+}
+
+/**
+ * Inizio anno nuovo (durata del ciclo configurabile in "⚙️ Anni scuola",
+ * variabile schoolYearsCount — 3 per le medie, 5 per le superiori, ecc.):
+ * - le classi che iniziano per un numero < schoolYearsCount vengono promosse
+ *   di un anno (es. con 5 anni: "1A"→"2A", "4B"→"5B")
+ * - le classi che iniziano proprio per schoolYearsCount vengono archiviate
+ *   (fine ciclo: con 5 anni succede alle "5ª", non alle "3ª")
+ * - tutte le verifiche attuali (Teacher Registro) vengono archiviate e la
+ *   lista verifiche riparte vuota; le verifiche archiviate restano
+ *   selezionabili come modello per le nuove.
+ * Nulla viene cancellato: le classi archiviate e le verifiche archiviate
+ * restano salvate su Firebase (users/{uid}/archivedClasses e
+ * users/{uid}/grading/archivedTests).
+ */
+async function startNewSchoolYear() {
+  if (!window.currentUser || !window.firebaseDb || !window.firebaseRef || !window.firebaseUpdate || !window.firebaseOnValue) {
+    alert('Devi essere connessa per avviare un nuovo anno scolastico.');
+    return;
+  }
+  if (!classes.length) {
+    alert('Non ci sono classi da promuovere.');
+    return;
+  }
+
+  const promoted = [];
+  const archived = [];
+  const unrecognized = [];
+
+  classes.forEach(cls => {
+    const yearNum = parseClassYearNumber(cls.name);
+    if (yearNum && yearNum > 0 && yearNum < schoolYearsCount) {
+      promoted.push({ cls, newName: promoteClassName(cls.name, yearNum + 1) });
+    } else if (yearNum === schoolYearsCount) {
+      archived.push(cls);
+    } else {
+      unrecognized.push(cls);
+    }
+  });
+
+  let summary = `📚 Inizio anno nuovo (ciclo di ${schoolYearsCount} anni) — riepilogo:\n\n`;
+  promoted.forEach(p => { summary += `• ${p.cls.name} → ${p.newName}\n`; });
+  archived.forEach(c => { summary += `• ${c.name} → ARCHIVIATA (fine ciclo)\n`; });
+  if (unrecognized.length) {
+    summary += `\n⚠️ Nome non riconosciuto (non inizia per un numero da 1 a ${schoolYearsCount}), lasciate invariate:\n`;
+    unrecognized.forEach(c => { summary += `• ${c.name}\n`; });
+  }
+  summary += '\nVerranno inoltre archiviate TUTTE le verifiche attuali di Teacher Registro ' +
+    '(resteranno disponibili come modello per le nuove verifiche).\n\nProcedere?';
+
+  if (!confirm(summary)) return;
+
+  showSyncIndicator('⏳ Avvio nuovo anno scolastico...', true);
+
+  try {
+    const userRef = window.firebaseRef(window.firebaseDb, 'users/' + window.currentUser.uid);
+
+    // Lettura fresca (non dalla cache locale) per non perdere archivi già esistenti
+    const snapshot = await new Promise((resolve, reject) => {
+      window.firebaseOnValue(userRef, (s) => resolve(s), (e) => reject(e), { onlyOnce: true });
+    });
+    const data = snapshot.val() || {};
+
+    // Ricalcola su dati freschi appena letti (non sulla cache locale) così la
+    // scrittura è sempre coerente con quello che c'è davvero su Firebase.
+    const freshClasses = normalizeLoadedData(data.classes || []);
+    const promotedIds = new Map(promoted.map(p => [p.cls.id, p.newName]));
+    const archivedIds = new Set(archived.map(c => c.id));
+
+    const existingArchivedClasses = Array.isArray(data.archivedClasses)
+      ? data.archivedClasses
+      : Object.values(data.archivedClasses || {});
+    const existingArchivedTests = (data.grading && Array.isArray(data.grading.archivedTests))
+      ? data.grading.archivedTests
+      : Object.values((data.grading && data.grading.archivedTests) || {});
+    const currentTests = (data.grading && Array.isArray(data.grading.tests))
+      ? data.grading.tests
+      : Object.values((data.grading && data.grading.tests) || {});
+
+    const archivedAt = new Date().toISOString();
+    const schoolYearLabel = computeSchoolYearLabel();
+
+    const newClasses = freshClasses
+      .filter(c => !archivedIds.has(c.id))
+      .map(c => (promotedIds.has(c.id) ? { ...c, name: promotedIds.get(c.id) } : c));
+
+    const newArchivedClasses = [
+      ...existingArchivedClasses,
+      ...freshClasses
+        .filter(c => archivedIds.has(c.id))
+        .map(c => ({ ...c, archivedAt, schoolYearLabel })),
+    ];
+
+    const newArchivedTests = [
+      ...existingArchivedTests,
+      ...currentTests.map(t => ({ ...t, archivedAt, schoolYearLabel })),
+    ];
+
+    // update() con percorsi multipli: tocca solo classes, archivedClasses e i
+    // due campi sotto "grading" indicati, senza toccare il resto di grading
+    // (voti, impostazioni, colori...) né "classrooms".
+    const updates = {
+      classes: newClasses,
+      archivedClasses: newArchivedClasses,
+      'grading/tests': [],
+      'grading/archivedTests': newArchivedTests,
+      lastUpdated: archivedAt,
+    };
+
+    await window.firebaseUpdate(userRef, updates);
+    showSyncIndicator('✅ Nuovo anno avviato!', false);
+    alert('Fatto! Classi promosse/archiviate e verifiche archiviate su Teacher Registro.');
+  } catch (err) {
+    console.error('Errore avvio nuovo anno:', err);
+    showSyncIndicator('❌ Errore', false);
+    alert("Si è verificato un errore durante l'avvio del nuovo anno: " + err.message);
   }
 }
 
