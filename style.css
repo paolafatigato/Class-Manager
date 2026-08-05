@@ -444,11 +444,11 @@ h2 {
 .student-seat {
   position: absolute;
   background: white;
-  border: 3px solid #667eea;
+  border: 3px solid var(--seat-class-color, #667eea);
   border-radius: 20px;
   padding: 15px 20px;
   user-select: none;
-  transition: box-shadow 0.3s, background 0.3s;
+  transition: box-shadow 0.3s, background 0.3s, border-color 0.3s;
   font-weight: 600;
   color: #764ba2;
   width: 120px;

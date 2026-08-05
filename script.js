@@ -191,6 +191,35 @@ function createRandomGroupsFromInput() {
 let classes = [];
 let classrooms = [];
 let currentClassId = null;
+// Colori delle classi: arrivano da Teacher Registro (users/{uid}/grading/settings/classColors)
+// Qui sono SOLO lettura: chi li imposta è Teacher Registro, Classroom Manager li mostra soltanto.
+let classColors = {};
+
+// Deep-link da Teacher Registro: es. ?classId=123 oppure ?classId=123&action=students
+// Serve per "portare l'utente su Classroom Manager" già sulla classe/azione giusta,
+// dato che qui è la base per aggiungere/modificare classi e alunni.
+const _deepLinkParams = new URLSearchParams(window.location.search);
+const _deepLinkClassId = _deepLinkParams.get('classId');
+const _deepLinkAction = _deepLinkParams.get('action');
+let _deepLinkHandled = false;
+
+function handleDeepLinkAfterLoad() {
+  if (_deepLinkHandled) return;
+  if (_deepLinkAction === 'newclass') {
+    _deepLinkHandled = true;
+    showAddClassModal();
+    return;
+  }
+  if (_deepLinkClassId && classes.some(c => c.id === _deepLinkClassId)) {
+    _deepLinkHandled = true;
+    openClass(_deepLinkClassId);
+    if (_deepLinkAction === 'students') {
+      showStudentListModal();
+    } else if (_deepLinkAction === 'rename') {
+      renameCurrentClass();
+    }
+  }
+}
 let _lastGroups = []; // ultimo set di gruppi creati, usato da arrangeGroupsOnSeats()
 let currentClassroomId = null;
 let isDragging = false;
@@ -290,14 +319,20 @@ function loadUserData(userId) {
       classrooms = Array.isArray(data.classrooms)
         ? data.classrooms
         : Object.values(data.classrooms || {});
+      // I colori delle classi vengono impostati in Teacher Registro e vivono in
+      // users/{uid}/grading/settings/classColors: li leggiamo qui in sola lettura,
+      // dallo stesso nodo utente già osservato, così restano sempre allineati.
+      classColors = (data.grading && data.grading.settings && data.grading.settings.classColors) || {};
     } else {
       classes = [];
       classrooms = [];
+      classColors = {};
     }
     
     renderClassList();
     renderClassroomList();
     showLoading(false);
+    handleDeepLinkAfterLoad();
   }, (error) => {
     console.error('Error loading data:', error);
     showLoading(false);
@@ -312,7 +347,11 @@ async function saveToFirebase() {
   
   try {
     const userRef = window.firebaseRef(window.firebaseDb, 'users/' + window.currentUser.uid);
-    await window.firebaseSet(userRef, {
+    // IMPORTANTE: usiamo update() e non set(). set() sovrascriverebbe l'INTERO nodo
+    // users/{uid}, cancellando "grading" (voti, verifiche, colori classi... di
+    // Teacher Registro) ogni volta che qui si salva una classe o un'aula.
+    // update() invece scrive solo le chiavi indicate, lasciando intatto il resto.
+    await window.firebaseUpdate(userRef, {
       classes: classes,
       classrooms: classrooms,
       lastUpdated: new Date().toISOString()
@@ -410,6 +449,12 @@ function renderClassList() {
       ? classrooms.find(c => c.id === cls.selectedClassroomId)?.name || 'Not selected'
       : 'Not selected';
 
+    // Colore classe: stesso colore impostato in Teacher Registro
+    const color = classColors[cls.id];
+    if (color) {
+      card.style.borderTop = `6px solid ${color}`;
+    }
+
     card.innerHTML = `
       <button class="delete-btn" onclick="event.stopPropagation(); deleteClass('${cls.id}')">×</button>
       <h3>${cls.name}</h3>
@@ -428,7 +473,11 @@ function openClass(classId) {
   
   document.getElementById('homePage').classList.add('hidden');
   document.getElementById('classPage').classList.remove('hidden');
-  document.getElementById('className').textContent = cls.name;
+  const classNameEl = document.getElementById('className');
+  classNameEl.textContent = cls.name;
+  const clsColor = classColors[cls.id];
+  classNameEl.style.borderLeft = clsColor ? `6px solid ${clsColor}` : '';
+  classNameEl.style.paddingLeft = clsColor ? '12px' : '';
   
   if (cls.selectedClassroomId) {
     const classroom = classrooms.find(c => c.id === cls.selectedClassroomId);
@@ -444,6 +493,17 @@ function showHomePage() {
   document.getElementById('classPage').classList.add('hidden');
   document.getElementById('homePage').classList.remove('hidden');
   currentClassId = null;
+}
+
+function renameCurrentClass() {
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls) return;
+  const newName = prompt('Nuovo nome della classe:', cls.name);
+  if (!newName || !newName.trim() || newName.trim() === cls.name) return;
+  cls.name = newName.trim();
+  document.getElementById('className').textContent = cls.name;
+  debouncedSave();
+  renderClassList();
 }
 
 // ========== CLASSROOM FUNCTIONS ==========
@@ -1229,6 +1289,14 @@ function renderSeatingChart() {
   const chart = document.getElementById('seatingChart');
   chart.innerHTML = '';
   clearSeatSelection();
+
+  // Contorno dei banchi dello stesso colore della classe (impostato in Teacher Registro)
+  const seatColor = cls ? classColors[cls.id] : null;
+  if (seatColor) {
+    chart.style.setProperty('--seat-class-color', seatColor);
+  } else {
+    chart.style.removeProperty('--seat-class-color');
+  }
 
   ensureSeatingByClassroom(cls);
 

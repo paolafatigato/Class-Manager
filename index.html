@@ -64,7 +64,8 @@
     <div id="classPage" class="hidden">
       <div class="class-header">
         <div>
-          <h1 id="className"></h1>
+          <h1 id="className" style="display:inline-block;"></h1>
+          <button class="btn btn-small btn-secondary" onclick="renameCurrentClass()" style="margin-left:10px;vertical-align:middle;" title="Rinomina classe">✏️ Rinomina</button>
           <p style="color: #667eea; margin-top: 5px;">
             Classroom: <strong id="currentClassroomName">Not selected</strong>
             <button class="btn btn-small" onclick="showSelectClassroomModal()" style="margin-left: 10px;">Change Classroom</button>
@@ -223,7 +224,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+    import { getDatabase, ref, set, update, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyA6O12KFRkZ4gGBi2LEGKZni33c3a2NBcU",
@@ -244,6 +245,7 @@
     window.firebaseDb = db;
     window.firebaseRef = ref;
     window.firebaseSet = set;
+    window.firebaseUpdate = update;
     window.firebaseOnValue = onValue;
 
     document.getElementById('googleSignInBtn').addEventListener('click', async () => {
