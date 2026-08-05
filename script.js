@@ -992,13 +992,15 @@ function _computeFinalScore(studentId, test, gradingScores, gradingTestVersions)
 
 /**
  * Calcola la media generale (0-10) di uno studente su tutti i test.
- * Esclude voti <= 2 (assenti/non svolti), come fa app.js.
+ * Esclude voti <= 2 (assenti/non svolti) e le verifiche archiviate (cambio
+ * anno scolastico / cambio quadrimestre), come fa app.js.
  */
 function computeStudentAverage(fullName, gradingData) {
   if (!gradingData?.tests || !gradingData?.scores) return null;
   if (!gradingData.scores[fullName]) return null; // nessun voto registrato
 
-  const finals = gradingData.tests
+  const activeTests = gradingData.tests.filter(test => !test.archived);
+  const finals = activeTests
     .map(test => _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions))
     .filter(v => v !== null && v > 2);
 
