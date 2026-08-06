@@ -798,7 +798,7 @@ function showSelectClassroomModal() {
   list.innerHTML = '';
   
   if (classrooms.length === 0) {
-    list.innerHTML = '<p style="color: #999; text-align: center;">No classrooms available. Create one first!</p>';
+    list.innerHTML = '<p style="color: #8a8a8a; text-align: center;">No classrooms available. Create one first!</p>';
   } else {
     classrooms.forEach(classroom => {
       const btn = document.createElement('button');
@@ -1162,7 +1162,7 @@ function _arrangeBtn() {
     onclick="arrangeGroupsOnSeats()"
     style="margin-top:14px;display:inline-flex;align-items:center;gap:8px;
       padding:10px 20px;border-radius:20px;border:none;cursor:pointer;font-weight:700;
-      font-size:.95em;background:linear-gradient(135deg,#667eea,#764ba2);color:white;
+      font-size:.95em;background:linear-gradient(135deg,var(--classroom-violet),var(--classroom-violet-dark));color:white;
       box-shadow:0 4px 12px rgba(102,126,234,.35);transition:transform .2s,box-shadow .2s;"
     onmouseover="this.style.transform='scale(1.05)'"
     onmouseout="this.style.transform='scale(1)'">
@@ -1178,7 +1178,7 @@ function _renderSmartGroups(groups, gradeMap, strategy, basisLabel) {
     homogeneous:  '📊 Gruppi Omogenei — stesso livello',
     heterogeneous:'🔀 Gruppi Eterogenei — livelli misti',
   };
-  let html = `<p style="font-size:.85em;color:#667eea;margin-bottom:2px;font-weight:600;">
+  let html = `<p style="font-size:.85em;color:var(--glaucous);margin-bottom:2px;font-weight:600;">
     ${labels[strategy] || strategy}
   </p>`;
   if (basisLabel) {
@@ -1187,8 +1187,8 @@ function _renderSmartGroups(groups, gradeMap, strategy, basisLabel) {
 
   groups.forEach((group, i) => {
     html += `<div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;
-      background:#f7fafc;border:1.5px solid #e2e8f0;">
-      <strong style="color:#764ba2;font-size:.95em;">Gruppo ${i + 1}</strong>
+      background:rgba(109,134,200,0.06);border:1.5px solid rgba(109,134,200,0.25);">
+      <strong style="color:var(--glaucous-dark);font-size:.95em;">Gruppo ${i + 1}</strong>
       <div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:6px;">`;
 
     group.forEach(s => {
@@ -1414,7 +1414,7 @@ async function createSmartGroupsFromInput() {
   }
 
   document.getElementById('groupResults').innerHTML =
-    '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
+    '<p style="color:var(--glaucous);font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
 
   try {
     const gradingData = await _getGradingData();
@@ -1448,7 +1448,7 @@ async function createSmartGroupsBySize() {
 
   const numGroups = Math.ceil(cls.students.length / size);
   document.getElementById('groupResults').innerHTML =
-    '<p style="color:#667eea;font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
+    '<p style="color:var(--glaucous);font-style:italic;">⏳ Caricamento voti da Firebase…</p>';
 
   try {
     const gradingData = await _getGradingData();
@@ -1679,7 +1679,7 @@ function renderSeatingChart() {
   updateModeButtons();
 
   if (!cls.selectedClassroomId) {
-    chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #999;"><h3>No classroom selected</h3><p>Please select a classroom to view the seating chart.</p></div>';
+    chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #8a8a8a;"><h3>No classroom selected</h3><p>Please select a classroom to view the seating chart.</p></div>';
     chart.style.height = '';
     chart.style.paddingBottom = '';
     return;
@@ -1687,7 +1687,7 @@ function renderSeatingChart() {
 
   const classroom = classrooms.find(c => c.id === cls.selectedClassroomId);
   if (!classroom) {
-    chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #f56565;"><h3>Classroom not found</h3></div>';
+    chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #A30B37;"><h3>Classroom not found</h3></div>';
     chart.style.height = '';
     chart.style.paddingBottom = '';
     return;
@@ -1768,10 +1768,10 @@ function updateModeButtons() {
   const editBtn = document.getElementById('editModeBtn');
   const studentBtn = document.getElementById('studentModeBtn');
   
-  editBtn.style.background = editMode ? '#48bb78' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+  editBtn.style.background = editMode ? 'var(--goodgrade)' : 'linear-gradient(135deg, var(--classroom-violet) 0%, var(--classroom-violet-dark) 100%)';
   editBtn.textContent = editMode ? '✓ Editing Desks' : '🔧 Edit Desks';
   
-  studentBtn.style.background = studentMode ? '#48bb78' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+  studentBtn.style.background = studentMode ? 'var(--goodgrade)' : 'linear-gradient(135deg, var(--classroom-violet) 0%, var(--classroom-violet-dark) 100%)';
   studentBtn.textContent = studentMode ? '✓ Moving Students' : '👥 Move Students';
 }
 
@@ -2107,9 +2107,19 @@ function drawWheel() {
   if (!students.length) return;
   
   const sliceAngle = (2 * Math.PI) / students.length;
-  
+
+  // Palette della ruota letta dai design token condivisi con Registro,
+  // così uno spostamento della palette nel CSS si riflette anche qui.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const wheelColors = [
+    rootStyle.getPropertyValue('--glaucous').trim() || '#6D86C8',
+    rootStyle.getPropertyValue('--flame-orange').trim() || '#FE5007',
+    rootStyle.getPropertyValue('--classroom-violet-dark').trim() || '#764ba2',
+    rootStyle.getPropertyValue('--classroom-violet').trim() || '#667eea'
+  ];
+
   students.forEach((student, i) => {
-    ctx.fillStyle = i % 2 === 0 ? '#667eea' : '#764ba2';
+    ctx.fillStyle = wheelColors[i % wheelColors.length];
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
     ctx.arc(centerX, centerY, radius, i * sliceAngle, (i + 1) * sliceAngle);

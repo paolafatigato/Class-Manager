@@ -7,17 +7,17 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="icon.png?v=20260309T150000" type="image/png">
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#667eea">
+  <meta name="theme-color" content="#6D86C8">
 </head>
 
 <body>
-  <div class="container">
-    
-    <!-- LOGIN PAGE -->
-    <div id="loginPage">
+
+  <!-- LOGIN PAGE -->
+  <div id="loginPage">
+    <div class="login-panel">
       <h1>🎓 Classroom Manager</h1>
       <div class="login-container">
-        <p style="color: #667eea; margin-bottom: 20px;">Sign in to access your classes from any device</p>
+        <p class="login-sub">Sign in to access your classes from any device</p>
         <button class="btn google-btn" id="googleSignInBtn">
           <svg width="20" height="20" viewBox="0 0 24 24" style="margin-right: 10px;">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -30,16 +30,21 @@
         <div id="loginError" class="error-message"></div>
       </div>
     </div>
+  </div>
 
-    <!-- HOME PAGE -->
-    <div id="homePage" class="hidden">
-      <div class="user-header">
-        <div class="user-info">
-          <img id="userAvatar" src="" alt="Avatar" class="user-avatar">
-          <span id="userName"></span>
+  <!-- HOME PAGE -->
+  <div id="homePage" class="hidden">
+    <header class="app-header">
+      <div class="header-content">
+        <div class="header-top">
+          <h1>🎓 Classroom Manager</h1>
+          <div class="user-info">
+            <img id="userAvatar" src="" alt="Avatar" class="user-avatar">
+            <span id="userName"></span>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <label for="schoolYearsCountSelect" style="font-size:.82em;color:#555;">⚙️ Anni scuola:</label>
+        <div class="nav-actions">
+          <label for="schoolYearsCountSelect">⚙️ Anni scuola:</label>
           <select id="schoolYearsCountSelect" title="Quanti anni dura il ciclo scolastico: determina quando le classi vengono archiviate invece che promosse">
             <option value="3">3 (medie)</option>
             <option value="4">4</option>
@@ -52,65 +57,83 @@
           <button class="btn btn-small btn-danger" id="logoutBtn">Logout</button>
         </div>
       </div>
-      
-      <h1>🎓 Classroom Manager</h1>
-      
+    </header>
+
+    <div class="container">
       <div id="loadingIndicator" class="loading">
         <div class="spinner"></div>
         <p>Loading your data...</p>
       </div>
-      
-      <div id="mainContent" class="hidden">
-        <h2>📚 Your Classes</h2>
-        <div class="class-list" id="classList"></div>
-        <button class="btn" onclick="showAddClassModal()">+ Add New Class</button>
-        <button class="btn btn-secondary" id="gradesBtn" style="margin-left: 10px;">Grades</button>
 
-        <h2 style="margin-top: 40px;">🏫 Your Classrooms</h2>
-        <div class="classroom-list" id="classroomList"></div>
-        <button class="btn btn-secondary" onclick="showAddClassroomModal()">+ Add New Classroom</button>
+      <div id="mainContent" class="hidden">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>📚 Your Classes</h2>
+            <div class="panel-header-actions">
+              <button class="btn btn-small" onclick="showAddClassModal()">+ Add New Class</button>
+              <button class="btn btn-small btn-secondary" id="gradesBtn">Grades</button>
+            </div>
+          </div>
+          <div class="class-list" id="classList"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>🏫 Your Classrooms</h2>
+            <button class="btn btn-small btn-classroom" onclick="showAddClassroomModal()">+ Add New Classroom</button>
+          </div>
+          <div class="classroom-list" id="classroomList"></div>
+        </section>
       </div>
     </div>
+  </div>
 
-    <!-- CLASS PAGE -->
-    <div id="classPage" class="hidden">
-      <div class="class-header">
-        <div>
-          <h1 id="className" style="display:inline-block;"></h1>
-          <button class="btn btn-small btn-secondary" onclick="renameCurrentClass()" style="margin-left:10px;vertical-align:middle;" title="Rinomina classe">✏️ Rinomina</button>
-          <p style="color: #667eea; margin-top: 5px;">
-            Classroom: <strong id="currentClassroomName">Not selected</strong>
-            <button class="btn btn-small" onclick="showSelectClassroomModal()" style="margin-left: 10px;">Change Classroom</button>
-          </p>
+  <!-- CLASS PAGE -->
+  <div id="classPage" class="hidden">
+    <div class="container">
+      <div class="panel view-toolbar">
+        <div class="class-header">
+          <div>
+            <h1 id="className" style="display:inline-block;"></h1>
+            <button class="btn btn-small btn-secondary" onclick="renameCurrentClass()" style="margin-left:10px;vertical-align:middle;" title="Rinomina classe">✏️ Rinomina</button>
+            <p class="classroom-meta">
+              Classroom: <strong id="currentClassroomName">Not selected</strong>
+              <button class="btn btn-small btn-classroom" onclick="showSelectClassroomModal()" style="margin-left: 10px;">Change Classroom</button>
+            </p>
+          </div>
+          <button class="btn btn-small btn-secondary" onclick="showHomePage()">← Back to Classes</button>
         </div>
-        <button class="btn btn-small" onclick="showHomePage()">← Back to Classes</button>
-      </div>
-      
-      <div class="class-controls">
-        <button class="btn btn-small" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
-        <button class="btn btn-small" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
-        <button class="btn btn-small" onclick="randomizeSeating()">🎲 Randomize Students</button>
-        <button class="btn btn-small btn-secondary" onclick="saveSeating()">💾 Save Layout</button>
-        <button class="btn btn-small" onclick="showWheel()">🎡 Student Picker</button>
-        <button class="btn btn-small btn-secondary" onclick="showGroupModal()">👫 Crea Gruppi</button>
-        <button class="btn btn-small btn-secondary" onclick="showStudentListModal()" id="studentListBtn" style="margin-left: 10px;">📋 List</button>
-        <button class="btn btn-small btn-print" onclick="printClassLayout()" title="Stampa layout classe" style="margin-left: 10px;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
+
+        <div class="class-controls">
+          <button class="btn btn-small" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
+          <button class="btn btn-small" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
+          <button class="btn btn-small btn-classroom" onclick="randomizeSeating()">🎲 Randomize Students</button>
+          <button class="btn btn-small btn-secondary" onclick="saveSeating()">💾 Save Layout</button>
+          <button class="btn btn-small" onclick="showWheel()">🎡 Student Picker</button>
+          <button class="btn btn-small btn-secondary" onclick="showGroupModal()">👫 Crea Gruppi</button>
+          <button class="btn btn-small btn-secondary" onclick="showStudentListModal()" id="studentListBtn">📋 List</button>
+          <button class="btn btn-small btn-print" onclick="printClassLayout()" title="Stampa layout classe"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
+        </div>
       </div>
 
       <div class="seating-chart" id="seatingChart"></div>
     </div>
+  </div>
 
-    <!-- CLASSROOM EDITOR PAGE -->
-    <div id="classroomEditorPage" class="hidden">
-      <div class="class-header">
-        <h1>🏫 Edit Classroom: <span id="editorClassroomName"></span></h1>
-        <button class="btn btn-small" onclick="exitClassroomEditor()">← Back</button>
-      </div>
-      
-      <div class="class-controls">
-        <p style="color: #667eea; font-weight: 600;">Drag desks to position them in the classroom</p>
-        <button class="btn btn-secondary" onclick="saveClassroomLayout()">💾 Save Classroom Layout</button>
-        <button class="btn btn-small btn-print" onclick="printClassroomLayout()" title="Stampa layout banchi" style="margin-left: 10px;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
+  <!-- CLASSROOM EDITOR PAGE -->
+  <div id="classroomEditorPage" class="hidden">
+    <div class="container">
+      <div class="panel view-toolbar">
+        <div class="class-header">
+          <h1>🏫 Edit Classroom: <span id="editorClassroomName"></span></h1>
+          <button class="btn btn-small btn-secondary" onclick="exitClassroomEditor()">← Back</button>
+        </div>
+
+        <div class="class-controls">
+          <p style="color: var(--classroom-violet-dark); font-weight: 600; flex-basis: 100%;">Drag desks to position them in the classroom</p>
+          <button class="btn btn-classroom" onclick="saveClassroomLayout()">💾 Save Classroom Layout</button>
+          <button class="btn btn-small btn-print" onclick="printClassroomLayout()" title="Stampa layout banchi"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
+        </div>
       </div>
 
       <div class="seating-chart" id="classroomEditorChart"></div>
@@ -164,7 +187,7 @@
         <input type="number" id="classroomDesksInput" min="1" max="50" value="20">
       </div>
       <div style="display: flex; gap: 10px;">
-        <button class="btn btn-secondary" onclick="addClassroom()">Create Classroom</button>
+        <button class="btn btn-classroom" onclick="addClassroom()">Create Classroom</button>
         <button class="btn btn-danger" onclick="closeModal('addClassroomModal')">Cancel</button>
       </div>
     </div>
@@ -184,7 +207,7 @@
     <div class="modal-content">
       <h2>🎡 Student Picker Wheel</h2>
       <div class="wheel-container">
-        <canvas id="wheelCanvas" width="400" height="400"></canvas>
+        <canvas id="wheelCanvas" width="400" height="400" class="wheel-canvas"></canvas>
         <button class="btn" onclick="spinWheel()">Spin!</button>
         <div class="wheel-result" id="wheelResult"></div>
       </div>
@@ -201,30 +224,30 @@
       <h2>👫 Crea Gruppi</h2>
 
       <!-- Strategia -->
-      <div style="margin-bottom:18px;padding:14px 16px;background:#f0f4ff;border-radius:12px;border:1.5px solid #c9d3f7;">
-        <label style="font-weight:700;color:#667eea;display:block;margin-bottom:8px;">📊 Strategia di raggruppamento</label>
-        <select id="groupStrategySelect" onchange="onGroupStrategyChange()" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+      <div class="group-strategy-box">
+        <label for="groupStrategySelect">📊 Strategia di raggruppamento</label>
+        <select id="groupStrategySelect" onchange="onGroupStrategyChange()">
           <option value="random">🎲 Casuale (randomico)</option>
           <option value="heterogeneous">🔀 Eterogeneo — livelli misti (il più efficace didatticamente)</option>
           <option value="homogeneous">📊 Omogeneo — stesso livello insieme</option>
         </select>
-        <p style="font-size:.8em;color:#764ba2;margin-top:8px;margin-bottom:0;">
+        <p class="group-strategy-hint">
           Le strategie per livello leggono i voti dal tuo Registro in automatico 🎓
         </p>
 
         <!-- Base di calcolo (solo per strategie per livello) -->
-        <div id="groupBasisBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #c9d3f7;">
-          <label style="font-weight:700;color:#667eea;display:block;margin-bottom:8px;">📐 Base di calcolo del livello</label>
-          <select id="groupBasisSelect" onchange="onGroupBasisChange()" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+        <div id="groupBasisBox" class="group-basis-box" style="display:none;">
+          <label for="groupBasisSelect">📐 Base di calcolo del livello</label>
+          <select id="groupBasisSelect" onchange="onGroupBasisChange()">
             <option value="average">📈 Media di tutte le verifiche</option>
             <option value="specific">🎯 Una verifica specifica</option>
           </select>
 
           <div id="groupTestBox" style="display:none;margin-top:10px;">
-            <select id="groupTestSelect" style="width:100%;padding:8px 12px;border-radius:8px;border:2px solid #c9d3f7;font-size:1em;color:#333;background:white;">
+            <select id="groupTestSelect">
               <option value="">⏳ Caricamento verifiche…</option>
             </select>
-            <p style="font-size:.78em;color:#888;margin-top:6px;margin-bottom:0;">
+            <p class="group-basis-note">
               Utile per creare gruppi eterogenei su un lavoro specifico, basandoti solo su quella verifica 🎯
             </p>
           </div>
@@ -232,15 +255,15 @@
       </div>
 
       <!-- Controlli -->
-      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px;">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label for="numGroupsInput" style="min-width:160px;">Numero di gruppi:</label>
-          <input type="number" id="numGroupsInput" min="2" max="50" value="2" style="width:60px;">
+      <div class="group-controls">
+        <div class="group-controls-row">
+          <label for="numGroupsInput">Numero di gruppi:</label>
+          <input type="number" id="numGroupsInput" min="2" max="50" value="2">
           <button class="btn" onclick="createSmartGroupsFromInput()">Crea Gruppi</button>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label for="numPerGroupInput" style="min-width:160px;">Persone per gruppo:</label>
-          <input type="number" id="numPerGroupInput" min="2" max="50" value="4" style="width:60px;">
+        <div class="group-controls-row">
+          <label for="numPerGroupInput">Persone per gruppo:</label>
+          <input type="number" id="numPerGroupInput" min="2" max="50" value="4">
           <button class="btn" onclick="createSmartGroupsBySize()">Crea Gruppi da N</button>
         </div>
       </div>
