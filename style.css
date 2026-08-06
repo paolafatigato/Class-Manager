@@ -232,6 +232,80 @@ h2 {
   color: var(--white);
 }
 
+/* Menu impostazioni (⚙️): racchiude Anni scuola, Inizio anno nuovo, Logout */
+.settings-menu-wrap {
+  position: relative;
+}
+
+.icon-btn-settings {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--white);
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition: transform 0.15s var(--ease), background 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.icon-btn-settings:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.settings-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 230px;
+  background: var(--white);
+  border-radius: var(--radius-md, 14px);
+  box-shadow: 0 12px 32px rgba(36, 36, 36, 0.22);
+  padding: 14px;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 200;
+}
+
+.settings-dropdown.active {
+  display: flex;
+}
+
+.settings-dropdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-dropdown-row label {
+  font-size: 0.85em;
+  color: var(--text-dark);
+  font-weight: 600;
+}
+
+.settings-dropdown-row select {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid rgba(109, 134, 200, 0.35);
+  font-size: 0.85em;
+  color: var(--text-dark);
+  background: var(--white);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.settings-dropdown-btn {
+  width: 100%;
+  text-align: center;
+}
+
 /* ═══════════════════════════════════════════════════════════
    CONTAINER & PANELS
    ═══════════════════════════════════════════════════════════ */

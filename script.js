@@ -167,6 +167,22 @@ document.addEventListener('DOMContentLoaded', function() {
       saveSchoolYearsCount(parseInt(e.target.value, 10) || 3);
     });
   }
+  // ⚙️ Menu impostazioni: Anni scuola / Inizio anno nuovo / Logout
+  const settingsMenuBtn = document.getElementById('settingsMenuBtn');
+  const settingsDropdown = document.getElementById('settingsDropdown');
+  if (settingsMenuBtn && settingsDropdown) {
+    settingsMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      settingsDropdown.classList.toggle('active');
+    });
+    settingsDropdown.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => {
+      settingsDropdown.classList.remove('active');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') settingsDropdown.classList.remove('active');
+    });
+  }
 });
 function createRandomGroupsBySize() {
   const input = document.getElementById('numPerGroupInput');

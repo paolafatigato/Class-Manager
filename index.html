@@ -41,20 +41,25 @@
           <div class="user-info">
             <img id="userAvatar" src="" alt="Avatar" class="user-avatar">
             <span id="userName"></span>
+            <div class="settings-menu-wrap">
+              <button class="icon-btn-settings" id="settingsMenuBtn" aria-label="Impostazioni" title="Impostazioni">⚙️</button>
+              <div class="settings-dropdown" id="settingsDropdown">
+                <div class="settings-dropdown-row">
+                  <label for="schoolYearsCountSelect">Anni scuola:</label>
+                  <select id="schoolYearsCountSelect" title="Quanti anni dura il ciclo scolastico: determina quando le classi vengono archiviate invece che promosse">
+                    <option value="3">3 (medie)</option>
+                    <option value="4">4</option>
+                    <option value="5">5 (superiori)</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                  </select>
+                </div>
+                <button class="btn btn-small btn-classroom settings-dropdown-btn" id="newYearBtn" title="Fai avanzare le classi e archivia l'anno scolastico appena concluso">🎓 Inizio anno nuovo</button>
+                <button class="btn btn-small btn-danger settings-dropdown-btn" id="logoutBtn">Logout</button>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="nav-actions">
-          <label for="schoolYearsCountSelect">⚙️ Anni scuola:</label>
-          <select id="schoolYearsCountSelect" title="Quanti anni dura il ciclo scolastico: determina quando le classi vengono archiviate invece che promosse">
-            <option value="3">3 (medie)</option>
-            <option value="4">4</option>
-            <option value="5">5 (superiori)</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-          </select>
-          <button class="btn btn-small btn-secondary" id="newYearBtn" title="Fai avanzare le classi e archivia l'anno scolastico appena concluso">🎓 Inizio anno nuovo</button>
-          <button class="btn btn-small btn-danger" id="logoutBtn">Logout</button>
         </div>
       </div>
     </header>
