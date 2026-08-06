@@ -95,7 +95,7 @@
         <div class="class-header">
           <div>
             <h1 id="className" style="display:inline-block;"></h1>
-            <button class="btn btn-small btn-secondary" onclick="renameCurrentClass()" style="margin-left:10px;vertical-align:middle;" title="Rinomina classe">✏️ Rinomina</button>
+            <button class="icon-btn-edit" onclick="showEditClassModal()" style="margin-left:10px;vertical-align:middle;" aria-label="Modifica classe" title="Rinomina classe o modifica l'elenco alunni">✏️</button>
             <p class="classroom-meta">
               Classroom: <strong id="currentClassroomName">Not selected</strong>
               <button class="btn btn-small btn-classroom" onclick="showSelectClassroomModal()" style="margin-left: 10px;">Change Classroom</button>
@@ -105,13 +105,12 @@
         </div>
 
         <div class="class-controls">
-          <button class="btn btn-small" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
-          <button class="btn btn-small" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
+          <button class="btn btn-small btn-classroom" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
+          <button class="btn btn-small btn-classroom" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
           <button class="btn btn-small btn-classroom" onclick="randomizeSeating()">🎲 Randomize Students</button>
-          <button class="btn btn-small btn-secondary" onclick="saveSeating()">💾 Save Layout</button>
-          <button class="btn btn-small" onclick="showWheel()">🎡 Student Picker</button>
-          <button class="btn btn-small btn-secondary" onclick="showGroupModal()">👫 Crea Gruppi</button>
-          <button class="btn btn-small btn-secondary" onclick="showStudentListModal()" id="studentListBtn">📋 List</button>
+          <button class="btn btn-small btn-classroom" onclick="showWheel()">🎡 Student Picker</button>
+          <button class="btn btn-small btn-classroom" onclick="showGroupModal()">👫 Crea Gruppi</button>
+          <button class="btn btn-small btn-classroom" onclick="saveSeating()">💾 Save Layout</button>
           <button class="btn btn-small btn-print" onclick="printClassLayout()" title="Stampa layout classe"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
         </div>
       </div>
@@ -140,17 +139,21 @@
     </div>
   </div>
 
-  <!-- Student List Modal -->
-  <div class="modal" id="studentListModal">
+  <!-- Edit Class Modal (rinomina classe + elenco alunni) -->
+  <div class="modal" id="editClassModal">
     <div class="modal-content" style="max-width: 500px;">
-      <h2>👥 Student List</h2>
+      <h2>✏️ Modifica classe</h2>
+      <div class="form-group">
+        <label for="editClassNameInput">Nome classe</label>
+        <input type="text" id="editClassNameInput" placeholder="e.g., 5th Grade A">
+      </div>
       <div style="margin-bottom: 10px; text-align: right;">
-        <button class="btn btn-small btn-secondary" id="addStudentBtn">+ Add Student</button>
+        <button class="btn btn-small btn-classroom" id="addStudentBtn">+ Add Student</button>
       </div>
       <div id="studentTableContainer"></div>
       <div style="display: flex; gap: 10px; margin-top: 20px;">
         <button class="btn" id="saveStudentListBtn">Save</button>
-        <button class="btn btn-danger" onclick="closeModal('studentListModal')">Cancel</button>
+        <button class="btn btn-danger" onclick="closeModal('editClassModal')">Cancel</button>
       </div>
     </div>
   </div>

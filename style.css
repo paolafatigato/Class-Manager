@@ -367,6 +367,29 @@ h2 {
   font-size: 0.85em;
 }
 
+/* Tasto icona ✏️ per rinominare la classe / modificare l'elenco alunni,
+   coerente con .icon-btn-classroom di Registro. */
+.icon-btn-edit {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--classroom-violet) 0%, var(--classroom-violet-dark) 100%);
+  color: var(--white);
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(36, 36, 36, 0.1);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.icon-btn-edit:hover {
+  transform: translateY(-1px) scale(1.05);
+  box-shadow: var(--shadow-lift);
+}
+
 /* ═══════════════════════════════════════════════════════════
    CLASSI E AULE (home page)
    ═══════════════════════════════════════════════════════════ */

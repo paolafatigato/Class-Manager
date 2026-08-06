@@ -49,12 +49,13 @@ function closeModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) modal.classList.remove('active');
 }
-// ===== STUDENT LIST MODAL =====
-function showStudentListModal() {
-  const modal = document.getElementById('studentListModal');
+// ===== EDIT CLASS MODAL (rinomina classe + elenco alunni) =====
+function showEditClassModal() {
+  const modal = document.getElementById('editClassModal');
   if (!currentClassId) return;
   const cls = classes.find(c => c.id === currentClassId);
   if (!cls) return;
+  document.getElementById('editClassNameInput').value = cls.name;
   // Ordina studenti per cognome
   let students = [...cls.students];
   students.sort((a, b) => {
@@ -87,7 +88,7 @@ function showStudentListModal() {
   };
   // Gestione salvataggio
   document.getElementById('saveStudentListBtn').onclick = function() {
-    saveStudentList();
+    saveEditClassModal();
   };
 }
 
@@ -113,10 +114,14 @@ function removeStudentRow(idx) {
   });
 }
 
-function saveStudentList() {
+function saveEditClassModal() {
   if (!currentClassId) return;
   const cls = classes.find(c => c.id === currentClassId);
   if (!cls) return;
+  // Nome classe
+  const newName = document.getElementById('editClassNameInput').value.trim();
+  if (newName) cls.name = newName;
+  // Elenco alunni
   const table = document.querySelector('#studentTableContainer tbody');
   const newStudents = [];
   Array.from(table.rows).forEach(row => {
@@ -138,9 +143,11 @@ function saveStudentList() {
     return 0;
   });
   cls.students = newStudents;
+  document.getElementById('className').textContent = cls.name;
   debouncedSave();
-  closeModal('studentListModal');
+  closeModal('editClassModal');
   renderClassList();
+  renderSeatingChart();
 }
 // ========== GRADES BUTTON ========== 
 document.addEventListener('DOMContentLoaded', function() {
@@ -227,10 +234,8 @@ function handleDeepLinkAfterLoad() {
   if (_deepLinkClassId && classes.some(c => c.id === _deepLinkClassId)) {
     _deepLinkHandled = true;
     openClass(_deepLinkClassId);
-    if (_deepLinkAction === 'students') {
-      showStudentListModal();
-    } else if (_deepLinkAction === 'rename') {
-      renameCurrentClass();
+    if (_deepLinkAction === 'students' || _deepLinkAction === 'rename') {
+      showEditClassModal();
     }
   }
 }
@@ -691,17 +696,6 @@ function showHomePage() {
   document.getElementById('classPage').classList.add('hidden');
   document.getElementById('homePage').classList.remove('hidden');
   currentClassId = null;
-}
-
-function renameCurrentClass() {
-  const cls = classes.find(c => c.id === currentClassId);
-  if (!cls) return;
-  const newName = prompt('Nuovo nome della classe:', cls.name);
-  if (!newName || !newName.trim() || newName.trim() === cls.name) return;
-  cls.name = newName.trim();
-  document.getElementById('className').textContent = cls.name;
-  debouncedSave();
-  renderClassList();
 }
 
 // ========== CLASSROOM FUNCTIONS ==========
