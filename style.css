@@ -823,6 +823,197 @@ h2 {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   STORICO DISPOSIZIONI (seating history)
+   Data sopra il piano banchi, frecce ‹ › ai due lati per sfogliare
+   le disposizioni passate. La disposizione passata viene mostrata
+   con un overlay di sola lettura sopra il piano banchi vero e
+   proprio, che resta intatto sotto (nessuna interferenza con
+   drag&drop, editMode, randomizeSeating...).
+   ═══════════════════════════════════════════════════════════ */
+.seating-history-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.seating-history-date-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  color: #666;
+  font-weight: 500;
+}
+
+.seating-history-date-input {
+  padding: 6px 8px;
+  border: 1.5px solid #e2e2e2;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.85em;
+  color: var(--text-dark);
+  background: var(--white);
+}
+
+.seating-history-date-input:focus {
+  outline: none;
+  border-color: var(--glaucous);
+  box-shadow: 0 0 0 3px rgba(109, 134, 200, 0.18);
+}
+
+.seating-history-ongoing {
+  background: var(--good-bg);
+  color: var(--goodgrade);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Piano banchi + frecce laterali */
+.seating-chart-stage {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.seating-chart-slot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.seating-chart-slot .seating-chart {
+  width: 100%;
+}
+
+.seating-history-arrow {
+  flex-shrink: 0;
+  width: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--classroom-violet) 0%, var(--classroom-violet-dark) 100%);
+  color: var(--white);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.seating-history-arrow:hover:not(:disabled) {
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+  transform: scale(1.04);
+}
+
+/* La freccia non disponibile (siamo già al capo della timeline) appare
+   un po' più sbiadita di quella attiva. */
+.seating-history-arrow:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Overlay di sola lettura con la disposizione passata, sopra il chart vero */
+.seating-history-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  z-index: 3;
+}
+
+.seating-history-overlay.active {
+  display: block;
+}
+
+/* Anteprima di sola lettura: stessa resa visiva di .teacher-desk /
+   .student-seat, ma con classi proprie per non interferire con i selettori
+   JS (document.querySelectorAll('.student-seat')) usati altrove. */
+.seating-history-desk {
+  position: absolute;
+  width: 240px;
+  height: 90px;
+  background: linear-gradient(135deg, var(--flame-orange) 0%, #d94406 100%);
+  border: 3px solid #c23e05;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  font-weight: 700;
+  font-family: var(--font-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 8px 20px rgba(254, 80, 7, 0.3);
+  user-select: none;
+  z-index: 2;
+}
+
+.seating-history-desk-label {
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm);
+}
+
+.seating-history-seat {
+  position: absolute;
+  background: var(--white);
+  border: 3px solid var(--seat-class-color, var(--glaucous));
+  border-radius: var(--radius-md);
+  padding: 15px 20px;
+  user-select: none;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  color: var(--glaucous-dark);
+  width: 120px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.seating-history-seat.empty {
+  background: rgba(109, 134, 200, 0.04);
+  border: 3px dashed rgba(109, 134, 200, 0.35);
+  color: #9aa5c4;
+  font-style: italic;
+  font-family: var(--font-body);
+  font-weight: 500;
+}
+
+/* Pulsanti disabilitati (es. durante la navigazione nello storico):
+   un po' più sbiaditi, coerente con le frecce qui sopra. */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (max-width: 640px) {
+  .seating-chart-stage {
+    gap: 6px;
+  }
+  .seating-history-arrow {
+    width: 34px;
+    font-size: 20px;
+  }
+  .seating-history-topbar {
+    gap: 8px;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
    RUOTA DELLO STUDENTE
    ═══════════════════════════════════════════════════════════ */
 .wheel-container {

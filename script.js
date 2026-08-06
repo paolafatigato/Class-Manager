@@ -274,6 +274,11 @@ let dragGroupData = null;
 let dragStartPoint = null;
 let dragChartEl = null;
 
+// ===== SEATING HISTORY: stato del browser dello storico disposizioni =====
+let _seatingHistoryTimeline = [];
+let _seatingHistoryIndex = 0;
+let _seatingHistoryClassroomId = null;
+
 // ========== UI FUNCTIONS ==========
 
 function showLoginUI() {
@@ -1692,6 +1697,7 @@ function renderSeatingChart() {
     chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #8a8a8a;"><h3>No classroom selected</h3><p>Please select a classroom to view the seating chart.</p></div>';
     chart.style.height = '';
     chart.style.paddingBottom = '';
+    resetSeatingHistoryView(null, null);
     return;
   }
 
@@ -1700,6 +1706,7 @@ function renderSeatingChart() {
     chart.innerHTML = '<div style="text-align: center; padding: 50px; color: #A30B37;"><h3>Classroom not found</h3></div>';
     chart.style.height = '';
     chart.style.paddingBottom = '';
+    resetSeatingHistoryView(null, null);
     return;
   }
 
@@ -1721,6 +1728,7 @@ function renderSeatingChart() {
   }
 
   updateChartHeight(chart);
+  resetSeatingHistoryView(cls, cls.selectedClassroomId);
 }
 
 function createSeatElement(displayName, x, y, index, deskId) {
@@ -2070,6 +2078,104 @@ function randomizeSeating() {
   });
 }
 
+// ========== SEATING HISTORY (storico disposizioni) ==========
+// Ogni volta che una disposizione viene salvata ed è diversa dalla
+// precedente, quest'ultima viene "chiusa" con una data di fine e archiviata
+// in cls.seatingHistory[classroomId]; la nuova disposizione diventa quella
+// "attuale", con data di inizio in cls.seatingCurrentStart[classroomId].
+// Le date sono calcolate in automatico ma restano sempre modificabili a
+// mano (vedi updateSeatingHistoryDate più sotto).
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addDaysISO(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function ensureSeatingHistory(cls) {
+  if (!cls) return;
+  if (!cls.seatingHistory || typeof cls.seatingHistory !== 'object') {
+    cls.seatingHistory = {};
+  }
+  if (!cls.seatingCurrentStart || typeof cls.seatingCurrentStart !== 'object') {
+    cls.seatingCurrentStart = {};
+  }
+}
+
+// Firma "chi siede su quale banco", indipendente dall'ordine degli elementi:
+// due disposizioni con la stessa firma sono considerate identiche.
+function seatingSignature(seating) {
+  return (seating || [])
+    .map(s => `${s.deskId}:${s.displayName || ''}`)
+    .sort()
+    .join('|');
+}
+
+function archiveSeatingIfChanged(cls, classroomId, newSeating) {
+  ensureSeatingHistory(cls);
+  const prevSeating = cls.seatingByClassroom ? cls.seatingByClassroom[classroomId] : null;
+  const today = todayISO();
+
+  if (!prevSeating || prevSeating.length === 0) {
+    if (!cls.seatingCurrentStart[classroomId]) cls.seatingCurrentStart[classroomId] = today;
+    return;
+  }
+
+  if (seatingSignature(prevSeating) === seatingSignature(newSeating)) {
+    if (!cls.seatingCurrentStart[classroomId]) cls.seatingCurrentStart[classroomId] = today;
+    return;
+  }
+
+  const startDate = cls.seatingCurrentStart[classroomId] || today;
+
+  if (startDate === today) {
+    // Ritoccata più volte nello stesso giorno: si aggiorna la disposizione
+    // "attuale" senza aprire una nuova voce di storico.
+    return;
+  }
+
+  if (!Array.isArray(cls.seatingHistory[classroomId])) cls.seatingHistory[classroomId] = [];
+  let endDate = addDaysISO(today, -1);
+  if (endDate < startDate) endDate = startDate;
+
+  cls.seatingHistory[classroomId].push({
+    id: 'seat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    seating: prevSeating,
+    startDate: startDate,
+    endDate: endDate
+  });
+
+  cls.seatingCurrentStart[classroomId] = today;
+}
+
+// Sequenza cronologica completa (storico + disposizione attuale) per
+// un'aula, usata dal browser dello storico.
+function getSeatingTimeline(cls, classroomId) {
+  ensureSeatingHistory(cls);
+  const past = Array.isArray(cls.seatingHistory[classroomId]) ? [...cls.seatingHistory[classroomId]] : [];
+  past.sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+
+  const timeline = past.map(e => ({ ...e, isCurrent: false }));
+
+  const currentSeating = cls.seatingByClassroom ? cls.seatingByClassroom[classroomId] : null;
+  if (currentSeating && currentSeating.length > 0) {
+    timeline.push({
+      id: 'current',
+      seating: currentSeating,
+      startDate: cls.seatingCurrentStart[classroomId] || todayISO(),
+      endDate: null,
+      isCurrent: true
+    });
+  }
+
+  return timeline;
+}
+
 function saveSeating() {
   const cls = classes.find(c => c.id === currentClassId);
   const seats = Array.from(document.querySelectorAll('.student-seat'));
@@ -2090,9 +2196,12 @@ function saveSeating() {
     };
   });
 
+  archiveSeatingIfChanged(cls, cls.selectedClassroomId, newSeating);
+
   cls.seatingByClassroom[cls.selectedClassroomId] = newSeating;
   
   debouncedSave();
+  resetSeatingHistoryView(cls, cls.selectedClassroomId);
   alert('Seating layout saved!');
 }
 
@@ -2200,3 +2309,187 @@ document.addEventListener('click', (e) => {
     e.target.classList.remove('active');
   }
 });
+
+// ========== SEATING HISTORY: data sopra e frecce laterali ==========
+// N.B. l'anteprima delle disposizioni passate usa classi CSS dedicate
+// (.seating-history-seat / .seating-history-desk), MAI .student-seat /
+// .teacher-desk: quelle classi sono usate altrove con
+// document.querySelectorAll('.student-seat') non ristretto al chart reale,
+// quindi riusarle qui romperebbe randomizeSeating/saveSeating/drag&drop.
+// L'anteprima è un overlay che copre #seatingChart (stesse posizioni dei
+// banchi, presi da classroom.desks: non cambiano tra una disposizione e
+// l'altra, solo l'assegnazione degli alunni ai banchi cambia).
+
+// Ricalcola la timeline (storico + attuale) per l'aula indicata e si
+// posiziona sulla disposizione attuale. Va richiamata ogni volta che il
+// piano banchi viene ridisegnato da zero (apertura classe, cambio aula...).
+function resetSeatingHistoryView(cls, classroomId) {
+  hideSeatingHistoryOverlay();
+  if (!cls || !classroomId) {
+    _seatingHistoryTimeline = [];
+    _seatingHistoryIndex = 0;
+    _seatingHistoryClassroomId = null;
+    updateSeatingHistoryBar();
+    return;
+  }
+  _seatingHistoryClassroomId = classroomId;
+  _seatingHistoryTimeline = getSeatingTimeline(cls, classroomId);
+  _seatingHistoryIndex = _seatingHistoryTimeline.length - 1;
+  updateSeatingHistoryBar();
+}
+
+function seatingHistoryStep(delta) {
+  if (!_seatingHistoryTimeline.length) return;
+  const newIndex = _seatingHistoryIndex + delta;
+  if (newIndex < 0 || newIndex >= _seatingHistoryTimeline.length) return;
+
+  _seatingHistoryIndex = newIndex;
+  const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
+
+  if (entry.isCurrent) {
+    hideSeatingHistoryOverlay();
+  } else {
+    showSeatingHistoryOverlay(entry);
+  }
+
+  updateSeatingHistoryBar();
+}
+
+function showSeatingHistoryOverlay(entry) {
+  const overlay = document.getElementById('seatingHistoryOverlay');
+  if (!overlay) return;
+  overlay.innerHTML = '';
+
+  const classroom = classrooms.find(c => c.id === _seatingHistoryClassroomId);
+  const cls = classes.find(c => c.id === currentClassId);
+  const color = cls ? classColors[cls.id] : null;
+  if (color) overlay.style.setProperty('--seat-class-color', color);
+  else overlay.style.removeProperty('--seat-class-color');
+
+  if (!classroom) {
+    overlay.innerHTML = '<div style="text-align:center;padding:40px;color:#8a8a8a;">Aula non trovata.</div>';
+  } else {
+    const teacherDesk = getTeacherDesk(classroom);
+    const deskEl = document.createElement('div');
+    deskEl.className = 'seating-history-desk';
+    deskEl.style.left = teacherDesk.x + 'px';
+    deskEl.style.top = teacherDesk.y + 'px';
+    const deskLabel = document.createElement('div');
+    deskLabel.className = 'seating-history-desk-label';
+    deskLabel.textContent = 'Teacher Desk';
+    deskEl.appendChild(deskLabel);
+    overlay.appendChild(deskEl);
+
+    const seatMap = new Map((entry.seating || []).map(s => [s.deskId, s.displayName]));
+    classroom.desks.forEach(desk => {
+      const name = seatMap.get(desk.id) || '';
+      const seat = document.createElement('div');
+      seat.className = 'seating-history-seat' + (name ? '' : ' empty');
+      seat.style.left = desk.x + 'px';
+      seat.style.top = desk.y + 'px';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'seating-history-name';
+      nameEl.textContent = name || 'Empty';
+      seat.appendChild(nameEl);
+      overlay.appendChild(seat);
+    });
+  }
+
+  overlay.classList.add('active');
+  setSeatingControlsEnabled(false);
+}
+
+function hideSeatingHistoryOverlay() {
+  const overlay = document.getElementById('seatingHistoryOverlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.innerHTML = '';
+  }
+  setSeatingControlsEnabled(true);
+}
+
+// Mentre si sfoglia una disposizione passata, disabilita i pulsanti che
+// modificherebbero il piano banchi "attuale" senza che l'utente lo veda
+// (l'overlay lo nasconde alla vista, ma il chart vero resta sotto).
+function setSeatingControlsEnabled(enabled) {
+  ['editModeBtn', 'studentModeBtn', 'randomizeSeatingBtn', 'saveSeatingBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !enabled;
+  });
+}
+
+// Aggiorna la data sopra il chart e lo stato (attiva/sbiadita) delle due
+// frecce ai lati, in base a dove ci si trova nella timeline.
+function updateSeatingHistoryBar() {
+  const topbar = document.getElementById('seatingHistoryTopbar');
+  const startInput = document.getElementById('seatingHistoryStartInput');
+  const endInput = document.getElementById('seatingHistoryEndInput');
+  const endWrap = document.getElementById('seatingHistoryEndWrap');
+  const ongoingLabel = document.getElementById('seatingHistoryOngoingLabel');
+  const prevBtn = document.getElementById('seatingHistoryPrevBtn');
+  const nextBtn = document.getElementById('seatingHistoryNextBtn');
+  if (!topbar || !startInput || !prevBtn || !nextBtn) return;
+
+  if (!_seatingHistoryTimeline.length) {
+    topbar.style.display = 'none';
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+
+  topbar.style.display = '';
+
+  const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
+  startInput.value = entry.startDate || '';
+
+  if (entry.isCurrent) {
+    endWrap.style.display = 'none';
+    ongoingLabel.style.display = '';
+  } else {
+    endWrap.style.display = '';
+    ongoingLabel.style.display = 'none';
+    endInput.value = entry.endDate || '';
+  }
+
+  prevBtn.disabled = (_seatingHistoryIndex === 0);
+  nextBtn.disabled = (_seatingHistoryIndex === _seatingHistoryTimeline.length - 1);
+}
+
+// Modifica manuale della data di inizio/fine della disposizione mostrata.
+// Le date restano comunque calcolate in automatico al momento del
+// salvataggio, ma sono sempre correggibili a mano da qui.
+function updateSeatingHistoryDate(field, value) {
+  if (!value) return;
+  const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
+  if (!entry) return;
+
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls) return;
+  ensureSeatingHistory(cls);
+
+  const candidateStart = field === 'start' ? value : entry.startDate;
+  const candidateEnd = entry.isCurrent ? null : (field === 'end' ? value : entry.endDate);
+
+  if (!entry.isCurrent && candidateStart && candidateEnd && candidateStart > candidateEnd) {
+    alert('La data di inizio non può essere successiva alla data di fine.');
+    updateSeatingHistoryBar();
+    return;
+  }
+
+  if (entry.isCurrent) {
+    cls.seatingCurrentStart[_seatingHistoryClassroomId] = candidateStart;
+    entry.startDate = candidateStart;
+  } else {
+    const list = cls.seatingHistory[_seatingHistoryClassroomId] || [];
+    const idx = list.findIndex(e => e.id === entry.id);
+    if (idx === -1) return;
+    list[idx].startDate = candidateStart;
+    list[idx].endDate = candidateEnd;
+    entry.startDate = candidateStart;
+    entry.endDate = candidateEnd;
+  }
+
+  debouncedSave();
+  updateSeatingHistoryBar();
+}

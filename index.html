@@ -112,15 +112,35 @@
         <div class="class-controls">
           <button class="btn btn-small btn-classroom" onclick="toggleEditMode()" id="editModeBtn">🔧 Edit Desks</button>
           <button class="btn btn-small btn-classroom" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
-          <button class="btn btn-small btn-classroom" onclick="randomizeSeating()">🎲 Randomize Students</button>
+          <button class="btn btn-small btn-classroom" onclick="randomizeSeating()" id="randomizeSeatingBtn">🎲 Randomize Students</button>
           <button class="btn btn-small btn-classroom" onclick="showWheel()">🎡 Student Picker</button>
           <button class="btn btn-small btn-classroom" onclick="showGroupModal()">👫 Crea Gruppi</button>
-          <button class="btn btn-small btn-classroom" onclick="saveSeating()">💾 Save Layout</button>
+          <button class="btn btn-small btn-classroom" onclick="saveSeating()" id="saveSeatingBtn">💾 Save Layout</button>
           <button class="btn btn-small btn-print" onclick="printClassLayout()" title="Stampa layout classe"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
         </div>
       </div>
 
-      <div class="seating-chart" id="seatingChart"></div>
+      <!-- Storico disposizioni: data sopra, frecce ai due lati del piano banchi -->
+      <div class="seating-history-topbar" id="seatingHistoryTopbar">
+        <span class="seating-history-date-label">dal
+          <input type="date" id="seatingHistoryStartInput" class="seating-history-date-input" onchange="updateSeatingHistoryDate('start', this.value)">
+        </span>
+        <span id="seatingHistoryEndWrap" class="seating-history-date-label">al
+          <input type="date" id="seatingHistoryEndInput" class="seating-history-date-input" onchange="updateSeatingHistoryDate('end', this.value)">
+        </span>
+        <span id="seatingHistoryOngoingLabel" class="seating-history-ongoing">In corso</span>
+      </div>
+
+      <div class="seating-chart-stage">
+        <button type="button" class="seating-history-arrow seating-history-arrow-left" id="seatingHistoryPrevBtn" onclick="seatingHistoryStep(-1)" aria-label="Disposizione precedente" title="Disposizione precedente">‹</button>
+
+        <div class="seating-chart-slot">
+          <div class="seating-chart" id="seatingChart"></div>
+          <div class="seating-chart seating-history-overlay" id="seatingHistoryOverlay"></div>
+        </div>
+
+        <button type="button" class="seating-history-arrow seating-history-arrow-right" id="seatingHistoryNextBtn" onclick="seatingHistoryStep(1)" aria-label="Disposizione successiva" title="Disposizione successiva">›</button>
+      </div>
     </div>
   </div>
 
