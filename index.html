@@ -164,13 +164,21 @@
     </div>
   </div>
 
-  <!-- Edit Class Modal (rinomina classe + elenco alunni) -->
+  <!-- Edit Class Modal (rinomina classe + colore + elenco alunni) -->
   <div class="modal" id="editClassModal">
     <div class="modal-content" style="max-width: 500px;">
       <h2>✏️ Modifica classe</h2>
       <div class="form-group">
         <label for="editClassNameInput">Nome classe</label>
         <input type="text" id="editClassNameInput" placeholder="e.g., 5th Grade A">
+      </div>
+      <div class="form-group">
+        <label>Colore classe</label>
+        <p style="font-size:.8rem;color:#888;margin:0 0 8px;">Lo stesso colore compare anche in Teacher Registro e Panoramica Prof.</p>
+        <div class="class-color-row">
+          <div class="class-color-swatches" id="editClassColorSwatches"></div>
+          <div class="class-color-preview" id="editClassColorPreview"></div>
+        </div>
       </div>
       <div style="margin-bottom: 10px; text-align: right;">
         <button class="btn btn-small btn-classroom" id="addStudentBtn">+ Add Student</button>

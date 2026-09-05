@@ -56,6 +56,7 @@ function showEditClassModal() {
   const cls = classes.find(c => c.id === currentClassId);
   if (!cls) return;
   document.getElementById('editClassNameInput').value = cls.name;
+  renderEditClassColorSwatches();
   // Ordina studenti per cognome
   let students = [...cls.students];
   students.sort((a, b) => {
@@ -90,6 +91,85 @@ function showEditClassModal() {
   document.getElementById('saveStudentListBtn').onclick = function() {
     saveEditClassModal();
   };
+}
+
+// ===== COLORE CLASSE (spostato qui da Teacher Registro: da qui in poi è
+// l'UNICO punto dove si sceglie, condiviso — users/{uid}/grading/settings/
+// classColors — con Teacher Registro e Panoramica Prof, che continuano a
+// leggerlo in sola lettura come già facevano. =====
+const CLASS_COLOR_PALETTE = ['#f08080', '#f4a460', '#ffd700', '#98fb98', '#6495ed', '#ba55d3'];
+
+function renderEditClassColorSwatches() {
+  const container = document.getElementById('editClassColorSwatches');
+  const preview = document.getElementById('editClassColorPreview');
+  if (!container || !currentClassId) return;
+  const cls = classes.find(c => c.id === currentClassId);
+  const current = (classColors[currentClassId] || '').toLowerCase();
+
+  container.innerHTML = '';
+
+  CLASS_COLOR_PALETTE.forEach(color => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'color-swatch' + (current === color.toLowerCase() ? ' selected' : '');
+    sw.style.background = color;
+    sw.title = color;
+    sw.onclick = () => selectClassColor(color);
+    container.appendChild(sw);
+  });
+
+  // Pallino arcobaleno: cliccandolo si apre il selettore colore nativo per
+  // crearne uno personalizzato (l'input è invisibile ma sovrapposto al
+  // pallino, così il click ci arriva comunque). Stesso pattern di Teacher Registro.
+  const customWrapper = document.createElement('div');
+  customWrapper.className = 'color-custom-wrapper';
+  customWrapper.title = 'Crea un colore personalizzato';
+  const customDot = document.createElement('span');
+  customDot.className = 'color-custom-dot';
+  customWrapper.appendChild(customDot);
+  const customInput = document.createElement('input');
+  customInput.type = 'color';
+  customInput.className = 'color-custom-input';
+  customInput.value = classColors[currentClassId] || '#cccccc';
+  customInput.oninput = (e) => selectClassColor(e.target.value);
+  customWrapper.appendChild(customInput);
+  container.appendChild(customWrapper);
+
+  if (preview) {
+    preview.style.background = classColors[currentClassId] || 'transparent';
+    preview.textContent = (cls && cls.name ? cls.name.charAt(0) : '?').toUpperCase();
+  }
+}
+
+function selectClassColor(hex) {
+  if (!currentClassId) return;
+  // Aggiorna subito la cache locale per un feedback immediato (bordo card,
+  // intestazione classe), poi salva su Firebase in background.
+  classColors[currentClassId] = hex;
+  renderEditClassColorSwatches();
+  renderClassList();
+  const classNameEl = document.getElementById('className');
+  if (classNameEl && currentClassId) {
+    classNameEl.style.borderLeft = `6px solid ${hex}`;
+    classNameEl.style.paddingLeft = '12px';
+  }
+  saveClassColor(currentClassId, hex);
+}
+
+async function saveClassColor(classId, hex) {
+  try {
+    const userRef = window.firebaseRef(window.firebaseDb, 'users/' + window.currentUser.uid);
+    // IMPORTANTE: update() con una chiave "a percorso" (non set() sull'intero
+    // nodo utente), così scriviamo solo questo colore senza toccare il resto
+    // di "grading" (voti, verifiche...) di Teacher Registro.
+    await window.firebaseUpdate(userRef, {
+      ['grading/settings/classColors/' + classId]: hex
+    });
+    if (typeof showSyncIndicator === 'function') showSyncIndicator('✓ Colore classe aggiornato');
+  } catch (error) {
+    console.error('Errore salvataggio colore classe:', error);
+    if (typeof showSyncIndicator === 'function') showSyncIndicator('❌ Errore salvataggio colore', false);
+  }
 }
 
 function addStudentRow() {
