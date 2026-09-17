@@ -569,6 +569,53 @@ h2 {
   color: var(--white);
 }
 
+/* Impugnatura di trascinamento per riordinare classi/aule: stesso
+   posizionamento/dimensione del delete-btn, ma speculare (in alto a
+   sinistra). touch-action: none evita che il tocco venga interpretato
+   come scroll della pagina mentre si trascina la card. */
+.classroom-card .drag-handle,
+.class-card .drag-handle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+}
+
+.class-card .drag-handle {
+  color: #999;
+  background: rgba(109, 134, 200, 0.12);
+}
+
+.classroom-card .drag-handle:active,
+.class-card .drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Card attualmente trascinata: leggermente sollevata e trasparente, per
+   dare un feedback visivo chiaro di cosa si sta spostando. */
+.classroom-card.dragging,
+.class-card.dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+  transform: scale(1.03);
+  z-index: 5;
+}
+
+.class-card h3,
+.classroom-card h3 {
+  padding-left: 20px;
+}
+
 /* ═══════════════════════════════════════════════════════════
    MODALI
    ═══════════════════════════════════════════════════════════ */
@@ -873,6 +920,16 @@ h2 {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+
+/* Pulsante elimina, visibile solo mentre si sfoglia una disposizione
+   passata (mai su quella attuale): lo stato iniziale è nascosto per
+   evitare un flash prima che il JS lo mostri/nasconda in base alla
+   posizione nello storico. */
+.seating-history-delete-btn {
+  display: none;
+  font-size: 0.8em;
+  padding: 6px 12px;
 }
 
 /* Piano banchi + frecce laterali */
@@ -1413,6 +1470,14 @@ h2 {
   background: none;
   opacity: 0; /* invisibile: il pallino arcobaleno sopra fa da bottone visivo */
   cursor: pointer;
+}
+
+.class-color-hex {
+  font-family: 'Courier New', monospace;
+  font-size: .8rem;
+  font-weight: 700;
+  color: #555;
+  letter-spacing: .3px;
 }
 
 .class-color-preview {

@@ -101,9 +101,7 @@ const CLASS_COLOR_PALETTE = ['#f08080', '#f4a460', '#ffd700', '#98fb98', '#6495e
 
 function renderEditClassColorSwatches() {
   const container = document.getElementById('editClassColorSwatches');
-  const preview = document.getElementById('editClassColorPreview');
   if (!container || !currentClassId) return;
-  const cls = classes.find(c => c.id === currentClassId);
   const current = (classColors[currentClassId] || '').toLowerCase();
 
   container.innerHTML = '';
@@ -114,13 +112,23 @@ function renderEditClassColorSwatches() {
     sw.className = 'color-swatch' + (current === color.toLowerCase() ? ' selected' : '');
     sw.style.background = color;
     sw.title = color;
-    sw.onclick = () => selectClassColor(color);
+    // Uno swatch fisso è una scelta già "definitiva": nessun trascinamento
+    // in corso, quindi si può ridisegnare/salvare subito.
+    sw.onclick = () => selectClassColor(color, { commit: true });
     container.appendChild(sw);
   });
 
   // Pallino arcobaleno: cliccandolo si apre il selettore colore nativo per
   // crearne uno personalizzato (l'input è invisibile ma sovrapposto al
   // pallino, così il click ci arriva comunque). Stesso pattern di Teacher Registro.
+  //
+  // IMPORTANTE: mentre il popup nativo del colore è aperto, questo <input>
+  // non va MAI ricreato/rimosso dal DOM — il browser lo chiuderebbe
+  // all'istante. Per questo 'input' (che scatta a ogni trascinamento nel
+  // selettore) chiama selectClassColor in modalità "solo anteprima"
+  // (commit: false), che NON tocca questo elemento; solo 'change' (quando
+  // la scelta è confermata e il popup si è già chiuso da solo) fa il
+  // salvataggio vero e ridisegna gli swatch.
   const customWrapper = document.createElement('div');
   customWrapper.className = 'color-custom-wrapper';
   customWrapper.title = 'Crea un colore personalizzato';
@@ -131,28 +139,53 @@ function renderEditClassColorSwatches() {
   customInput.type = 'color';
   customInput.className = 'color-custom-input';
   customInput.value = classColors[currentClassId] || '#cccccc';
-  customInput.oninput = (e) => selectClassColor(e.target.value);
+  customInput.oninput = (e) => selectClassColor(e.target.value, { commit: false });
+  customInput.onchange = (e) => selectClassColor(e.target.value, { commit: true });
   customWrapper.appendChild(customInput);
   container.appendChild(customWrapper);
 
-  if (preview) {
-    preview.style.background = classColors[currentClassId] || 'transparent';
-    preview.textContent = (cls && cls.name ? cls.name.charAt(0) : '?').toUpperCase();
-  }
+  updateEditClassColorPreview();
 }
 
-function selectClassColor(hex) {
+// Aggiorna SOLO il pallino di anteprima grande e l'etichetta esadecimale,
+// senza toccare il resto della modale (in particolare senza ricreare
+// l'<input type="color">). È la funzione da chiamare durante il
+// trascinamento nel selettore nativo: un feedback immediato senza
+// interrompere il popup che l'utente sta ancora usando.
+function updateEditClassColorPreview() {
+  const preview = document.getElementById('editClassColorPreview');
+  const hexLabel = document.getElementById('editClassColorHex');
+  const cls = classes.find(c => c.id === currentClassId);
+  const hex = classColors[currentClassId] || '';
+
+  if (preview) {
+    preview.style.background = hex || 'transparent';
+    preview.textContent = (cls && cls.name ? cls.name.charAt(0) : '?').toUpperCase();
+  }
+  if (hexLabel) hexLabel.textContent = hex ? hex.toUpperCase() : '';
+}
+
+// commit: false -> anteprima "al volo" mentre si trascina nel selettore
+// nativo (nessun ridisegno degli swatch, nessun salvataggio su Firebase).
+// commit: true (default) -> scelta definitiva: ridisegna gli swatch e
+// salva davvero.
+function selectClassColor(hex, opts = {}) {
   if (!currentClassId) return;
-  // Aggiorna subito la cache locale per un feedback immediato (bordo card,
-  // intestazione classe), poi salva su Firebase in background.
+  const commit = opts.commit !== false;
+
+  // Aggiorna subito la cache locale e l'anteprima per un feedback immediato.
   classColors[currentClassId] = hex;
-  renderEditClassColorSwatches();
-  renderClassList();
+  updateEditClassColorPreview();
   const classNameEl = document.getElementById('className');
   if (classNameEl && currentClassId) {
     classNameEl.style.borderLeft = `6px solid ${hex}`;
     classNameEl.style.paddingLeft = '12px';
   }
+
+  if (!commit) return;
+
+  renderEditClassColorSwatches();
+  renderClassList();
   saveClassColor(currentClassId, hex);
 }
 
@@ -263,6 +296,10 @@ document.addEventListener('DOMContentLoaded', function() {
       if (e.key === 'Escape') settingsDropdown.classList.remove('active');
     });
   }
+
+  // Riordino trascinabile per le card di classi e aule (vedi enableCardReorder).
+  enableCardReorder('classList', '.class-card', () => classes);
+  enableCardReorder('classroomList', '.classroom-card', () => classrooms);
 });
 function createRandomGroupsBySize() {
   const input = document.getElementById('numPerGroupInput');
@@ -741,6 +778,76 @@ function deleteClass(classId) {
   renderClassList();
 }
 
+// ========== RIORDINO CARD (classi e aule) ==========
+// Uso i Pointer Events (non il drag&drop nativo HTML5, che su touch/tablet
+// spesso non funziona) così lo stesso codice gestisce mouse e dito. Il
+// trascinamento parte solo dall'apposita "impugnatura" (drag-handle), mai
+// dal resto della card, per non interferire col click che apre classe/aula.
+const DRAG_HANDLE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="18" r="2"/><circle cx="16" cy="18" r="2"/></svg>';
+
+// getDataArray è una funzione (non l'array direttamente!) perché "classes"
+// e "classrooms" vengono RIASSEGNATI a ogni sincronizzazione Firebase
+// (classes = normalizeLoadedData(...)): catturare il riferimento una volta
+// sola all'avvio significherebbe riordinare, poco dopo, un array ormai
+// abbandonato. Chiamando getDataArray() solo al rilascio del trascinamento
+// si legge sempre il riferimento realmente in uso in quel momento.
+function enableCardReorder(containerId, cardSelector, getDataArray) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const draggedEl = handle.closest(cardSelector);
+    if (!draggedEl) return;
+
+    e.preventDefault();
+    draggedEl.classList.add('dragging');
+
+    const onMove = (ev) => {
+      const siblings = [...container.querySelectorAll(cardSelector)].filter(el => el !== draggedEl);
+      let closest = null;
+      let closestDist = Infinity;
+      siblings.forEach(sib => {
+        const box = sib.getBoundingClientRect();
+        const cx = box.left + box.width / 2;
+        const cy = box.top + box.height / 2;
+        const dist = Math.hypot(ev.clientX - cx, ev.clientY - cy);
+        if (dist < closestDist) { closestDist = dist; closest = { el: sib, cx }; }
+      });
+      if (closest) {
+        if (ev.clientX < closest.cx) {
+          container.insertBefore(draggedEl, closest.el);
+        } else {
+          container.insertBefore(draggedEl, closest.el.nextSibling);
+        }
+      }
+    };
+
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      draggedEl.classList.remove('dragging');
+
+      // Ricostruisce l'array nel nuovo ordine del DOM, mutando lo STESSO
+      // riferimento (mai riassegnato con "="), così resta valido ovunque
+      // altrove nel codice lo si referenzi.
+      const dataArray = getDataArray();
+      const orderedIds = [...container.querySelectorAll(cardSelector)].map(el => el.dataset.id);
+      const reordered = orderedIds
+        .map(id => dataArray.find(item => item.id === id))
+        .filter(Boolean);
+      dataArray.length = 0;
+      dataArray.push(...reordered);
+
+      debouncedSave();
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+}
+
 function renderClassList() {
   const container = document.getElementById('classList');
   container.innerHTML = '';
@@ -748,6 +855,7 @@ function renderClassList() {
   classes.forEach(cls => {
     const card = document.createElement('div');
     card.className = 'class-card';
+    card.dataset.id = cls.id;
 
     const classroomName = cls.selectedClassroomId
       ? classrooms.find(c => c.id === cls.selectedClassroomId)?.name || 'Not selected'
@@ -760,6 +868,7 @@ function renderClassList() {
     }
 
     card.innerHTML = `
+      <span class="drag-handle" title="Trascina per riordinare">${DRAG_HANDLE_SVG}</span>
       <button class="delete-btn" onclick="event.stopPropagation(); deleteClass('${cls.id}')">×</button>
       <h3>${cls.name}</h3>
       <p>${cls.students.length} students</p>
@@ -875,13 +984,15 @@ function renderClassroomList() {
   classrooms.forEach(classroom => {
     const card = document.createElement('div');
     card.className = 'classroom-card';
-    
+    card.dataset.id = classroom.id;
+
     card.innerHTML = `
+      <span class="drag-handle" title="Trascina per riordinare">${DRAG_HANDLE_SVG}</span>
       <button class="delete-btn" onclick="event.stopPropagation(); deleteClassroom('${classroom.id}')">×</button>
       <h3>${classroom.name}</h3>
       <p>${classroom.desks.length} desks</p>
     `;
-    
+
     card.onclick = () => openClassroomEditor(classroom.id);
     container.appendChild(card);
   });
@@ -2216,6 +2327,14 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
   if (startDate === today) {
     // Ritoccata più volte nello stesso giorno: si aggiorna la disposizione
     // "attuale" senza aprire una nuova voce di storico.
+    // IMPORTANTE: va comunque scritta esplicitamente, anche quando
+    // coincide già con "oggi". Senza questa riga, una disposizione
+    // salvata PRIMA che questa funzionalità esistesse (o comunque senza
+    // una data di inizio nota) fa sì che startDate riparta da "oggi" a
+    // ogni chiamata futura: il confronto sopra risulta sempre vero e
+    // nessuna disposizione passata viene più archiviata, nemmeno cambiando
+    // giorno (bug delle frecce "indietro" sempre disabilitate).
+    cls.seatingCurrentStart[classroomId] = today;
     return;
   }
 
@@ -2534,6 +2653,36 @@ function updateSeatingHistoryBar() {
 
   prevBtn.disabled = (_seatingHistoryIndex === 0);
   nextBtn.disabled = (_seatingHistoryIndex === _seatingHistoryTimeline.length - 1);
+
+  const deleteBtn = document.getElementById('seatingHistoryDeleteBtn');
+  if (deleteBtn) {
+    // Si può eliminare solo una disposizione PASSATA (mai quella attuale).
+    deleteBtn.style.display = entry.isCurrent ? 'none' : '';
+  }
+}
+
+// Elimina la disposizione passata attualmente mostrata nello storico
+// (es. una prova durata meno di un giorno, salvata per errore). La
+// disposizione "attuale" non può mai essere eliminata da qui: per
+// sostituirla basta salvare un nuovo piano banchi.
+function deleteSeatingHistoryEntry() {
+  const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
+  if (!entry || entry.isCurrent) return;
+
+  if (!confirm('Eliminare questa disposizione passata? L\'operazione non è reversibile.')) return;
+
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls || !_seatingHistoryClassroomId) return;
+  ensureSeatingHistory(cls);
+
+  const list = cls.seatingHistory[_seatingHistoryClassroomId] || [];
+  const idx = list.findIndex(e => e.id === entry.id);
+  if (idx === -1) return;
+
+  list.splice(idx, 1);
+
+  debouncedSave();
+  resetSeatingHistoryView(cls, _seatingHistoryClassroomId);
 }
 
 // Modifica manuale della data di inizio/fine della disposizione mostrata.
