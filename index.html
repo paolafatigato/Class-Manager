@@ -221,7 +221,17 @@
         <input type="text" id="classroomNameInput" placeholder="e.g., Room 101, Lab A">
       </div>
       <div class="form-group">
-        <label for="classroomDesksInput">Number of Desks</label>
+        <label for="classroomLayoutSelect">Disposizione banchi</label>
+        <select id="classroomLayoutSelect">
+          <option value="grid">🔲 Griglia semplice</option>
+          <option value="pairs">👫 Banchi a coppie (3 file)</option>
+          <option value="groups4">🍀 Banchi a gruppi da 4</option>
+          <option value="horseshoe">🐴 Ferro di cavallo</option>
+        </select>
+        <p style="font-size:.8rem;color:#888;margin:8px 0 0;">Punto di partenza: dopo puoi comunque trascinare i singoli banchi in "Edit Desks" 🖐️</p>
+      </div>
+      <div class="form-group">
+        <label for="classroomDesksInput">Numero di alunni</label>
         <input type="number" id="classroomDesksInput" min="1" max="50" value="20">
       </div>
       <div style="display: flex; gap: 10px;">

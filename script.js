@@ -914,32 +914,215 @@ function showAddClassroomModal() {
   document.getElementById('addClassroomModal').classList.add('active');
 }
 
-function addClassroom() {
-  const name = document.getElementById('classroomNameInput').value.trim();
-  const numDesks = parseInt(document.getElementById('classroomDesksInput').value);
+// ---- Generatori di disposizione banchi ----
+// Ogni funzione restituisce { desks:[{id,x,y}], teacherDesk:{x,y} } per un
+// dato numero di alunni. È solo il punto di partenza: ogni banco resta
+// trascinabile a piacere da "Edit Desks".
+const DESK_W = 120;
+const DESK_H = 80;
+const TEACHER_DESK_W = 240;
+const TEACHER_DESK_H = 90;
 
-  if (!name) {
-    alert('Please enter a classroom name');
-    return;
-  }
+// Sul cellulare banchi e cattedra si rimpiccioliscono, ma le distanze si
+// riducono nella STESSA proporzione: i banchi che si toccavano a piena
+// scala continuano a toccarsi. Applicato a posizione E dimensione insieme
+// (mai in CSS puro), così restano proporzionali punto per punto.
+const MOBILE_SCALE_BREAKPOINT = 640;
+const MOBILE_DESK_SCALE = 0.72;
+function getDeskScale() {
+  return window.innerWidth <= MOBILE_SCALE_BREAKPOINT ? MOBILE_DESK_SCALE : 1;
+}
 
+function layoutGrid(numDesks) {
   const cols = Math.ceil(Math.sqrt(numDesks));
   const desks = [];
   for (let i = 0; i < numDesks; i++) {
     const row = Math.floor(i / cols);
     const col = i % cols;
-    desks.push({
-      id: `desk_${i}`,
-      x: col * 150 + 50,
-      y: row * 100 + 50
-    });
+    desks.push({ id: `desk_${i}`, x: col * 150 + 50, y: row * 100 + 50 });
+  }
+  const layoutWidth = cols * 150;
+  const teacherDesk = { x: Math.max(20, (layoutWidth / 2) - (TEACHER_DESK_W / 2)), y: 20 };
+  return { desks, teacherDesk };
+}
+
+// Banchi a coppie, su 3 file (colonne) — es. screenshot di riferimento
+function layoutPairs(numDesks) {
+  const PAIR_GAP = 8;
+  const COL_GAP = 60;
+  const ROW_GAP = 30;
+  const TOP_MARGIN = 130;
+  const LEFT_MARGIN = 50;
+  const COLS = 3;
+
+  const pairWidth = DESK_W * 2 + PAIR_GAP;
+  const colStride = pairWidth + COL_GAP;
+  const rowStride = DESK_H + ROW_GAP;
+
+  const numPairs = Math.ceil(numDesks / 2);
+  const desks = [];
+  let idx = 0;
+  for (let p = 0; p < numPairs; p++) {
+    const row = Math.floor(p / COLS);
+    const col = p % COLS;
+    const pairX = LEFT_MARGIN + col * colStride;
+    const pairY = TOP_MARGIN + row * rowStride;
+    desks.push({ id: `desk_${idx}`, x: pairX, y: pairY }); idx++;
+    if (idx < numDesks) {
+      desks.push({ id: `desk_${idx}`, x: pairX + DESK_W + PAIR_GAP, y: pairY }); idx++;
+    }
   }
 
-  const layoutWidth = cols * 150;
-  const teacherDesk = {
-    x: Math.max(20, (layoutWidth / 2) - 120),
-    y: 20
-  };
+  const colsUsed = Math.min(COLS, numPairs) || 1;
+  const layoutWidth = colsUsed * pairWidth + (colsUsed - 1) * COL_GAP;
+  const teacherDesk = { x: LEFT_MARGIN + layoutWidth / 2 - TEACHER_DESK_W / 2, y: 20 };
+  return { desks, teacherDesk };
+}
+
+// Banchi a gruppi da 4 (isole 2x2), 3 gruppi per fila
+function layoutGroups4(numDesks) {
+  const INNER_GAP = 8;
+  const GROUP_GAP = 70;
+  const ROW_GAP = 40;
+  const TOP_MARGIN = 130;
+  const LEFT_MARGIN = 50;
+  const GROUPS_PER_ROW = 3;
+
+  const clusterW = DESK_W * 2 + INNER_GAP;
+  const clusterH = DESK_H * 2 + INNER_GAP;
+  const colStride = clusterW + GROUP_GAP;
+  const rowStride = clusterH + ROW_GAP;
+
+  const numGroups = Math.ceil(numDesks / 4);
+  const desks = [];
+  let idx = 0;
+  for (let g = 0; g < numGroups; g++) {
+    const row = Math.floor(g / GROUPS_PER_ROW);
+    const col = g % GROUPS_PER_ROW;
+    const gx = LEFT_MARGIN + col * colStride;
+    const gy = TOP_MARGIN + row * rowStride;
+    const offsets = [
+      [0, 0], [DESK_W + INNER_GAP, 0],
+      [0, DESK_H + INNER_GAP], [DESK_W + INNER_GAP, DESK_H + INNER_GAP]
+    ];
+    for (let k = 0; k < 4 && idx < numDesks; k++) {
+      desks.push({ id: `desk_${idx}`, x: gx + offsets[k][0], y: gy + offsets[k][1] });
+      idx++;
+    }
+  }
+
+  const groupsUsed = Math.min(GROUPS_PER_ROW, numGroups) || 1;
+  const layoutWidth = groupsUsed * clusterW + (groupsUsed - 1) * GROUP_GAP;
+  const teacherDesk = { x: LEFT_MARGIN + layoutWidth / 2 - TEACHER_DESK_W / 2, y: 20 };
+  return { desks, teacherDesk };
+}
+
+// Ferro di cavallo: banchi lungo tre lati (sinistra, basso, destra), aperto
+// verso la cattedra in alto. Se non entrano tutti sul perimetro, quelli in
+// più formano una doppia fila al centro, nello spazio aperto della "U".
+function layoutHorseshoe(numDesks) {
+  const GAP_V = DESK_H + 20;
+  const GAP_H = DESK_W + 20;
+  const TOP_MARGIN = 130;
+  const LEFT_X = 50;
+  const SIDE_CAP = 5;    // banchi massimi per lato verticale
+  const BOTTOM_CAP = 6;  // banchi massimi sulla fila in basso
+  const MID_GAP = 50;    // spazio fra i due banchi della doppia fila centrale
+  const PERIMETER_CAP = SIDE_CAP * 2 + BOTTOM_CAP;
+
+  let leftCount, rightCount, bottomCount, middleCount;
+
+  if (numDesks <= PERIMETER_CAP) {
+    // Pochi banchi: stanno tutti sul perimetro (stesse proporzioni di prima)
+    leftCount = Math.max(1, Math.round(numDesks * 0.25));
+    rightCount = Math.max(1, Math.round(numDesks * 0.25));
+    bottomCount = numDesks - leftCount - rightCount;
+    if (bottomCount < 1) {
+      leftCount = Math.floor((numDesks - 1) / 2);
+      rightCount = numDesks - 1 - leftCount;
+      bottomCount = 1;
+    }
+    middleCount = 0;
+  } else {
+    // Troppi banchi per il solo perimetro: perimetro al massimo, il resto
+    // forma una doppia fila al centro
+    leftCount = SIDE_CAP;
+    rightCount = SIDE_CAP;
+    bottomCount = BOTTOM_CAP;
+    middleCount = numDesks - leftCount - rightCount - bottomCount;
+  }
+
+  const middlePairs = Math.ceil(middleCount / 2);
+  const rows = Math.max(leftCount, rightCount, middlePairs);
+  const bottomY = TOP_MARGIN + rows * GAP_V;
+
+  const desks = [];
+  let idx = 0;
+
+  // Lato sinistro, dall'alto in basso
+  for (let i = 0; i < leftCount; i++) {
+    desks.push({ id: `desk_${idx}`, x: LEFT_X, y: TOP_MARGIN + i * GAP_V }); idx++;
+  }
+
+  // Fila in basso, da sinistra a destra
+  for (let i = 0; i < bottomCount; i++) {
+    desks.push({ id: `desk_${idx}`, x: LEFT_X + i * GAP_H, y: bottomY }); idx++;
+  }
+  const rightX = LEFT_X + (bottomCount - 1) * GAP_H;
+
+  // Lato destro, dal basso in alto (specchio del sinistro)
+  for (let i = 0; i < rightCount; i++) {
+    desks.push({ id: `desk_${idx}`, x: rightX, y: bottomY - (i + 1) * GAP_V }); idx++;
+  }
+
+  // Doppia fila al centro, nello spazio aperto della "U"
+  if (middleCount > 0) {
+    const innerLeft = LEFT_X + DESK_W;
+    const midCenterX = (innerLeft + rightX) / 2;
+    const leftDeskX = midCenterX - DESK_W - MID_GAP / 2;
+    const rightDeskX = midCenterX + MID_GAP / 2;
+
+    let placed = 0;
+    for (let p = 0; p < middlePairs && placed < middleCount; p++) {
+      const y = TOP_MARGIN + p * GAP_V;
+      desks.push({ id: `desk_${idx}`, x: leftDeskX, y }); idx++; placed++;
+      if (placed < middleCount) {
+        desks.push({ id: `desk_${idx}`, x: rightDeskX, y }); idx++; placed++;
+      }
+    }
+  }
+
+  const layoutWidth = (rightX + DESK_W) - LEFT_X;
+  const teacherDesk = { x: LEFT_X + layoutWidth / 2 - TEACHER_DESK_W / 2, y: 20 };
+  return { desks, teacherDesk };
+}
+
+function generateDeskLayout(numDesks, layoutType) {
+  switch (layoutType) {
+    case 'pairs': return layoutPairs(numDesks);
+    case 'groups4': return layoutGroups4(numDesks);
+    case 'horseshoe': return layoutHorseshoe(numDesks);
+    case 'grid':
+    default: return layoutGrid(numDesks);
+  }
+}
+
+function addClassroom() {
+  const name = document.getElementById('classroomNameInput').value.trim();
+  const numDesks = parseInt(document.getElementById('classroomDesksInput').value);
+  const layoutSelect = document.getElementById('classroomLayoutSelect');
+  const layoutType = layoutSelect ? layoutSelect.value : 'grid';
+
+  if (!name) {
+    alert('Please enter a classroom name');
+    return;
+  }
+  if (!numDesks || numDesks < 1) {
+    alert('Please enter a valid number of students');
+    return;
+  }
+
+  const { desks, teacherDesk } = generateDeskLayout(numDesks, layoutType);
 
   const newClassroom = {
     id: Date.now().toString(),
@@ -954,9 +1137,9 @@ function addClassroom() {
   
   document.getElementById('classroomNameInput').value = '';
   document.getElementById('classroomDesksInput').value = '20';
+  if (layoutSelect) layoutSelect.value = 'grid';
   closeModal('addClassroomModal');
 }
-
 function deleteClassroom(classroomId) {
   if (!confirm('Delete this classroom?')) return;
   
@@ -1023,8 +1206,26 @@ function showSelectClassroomModal() {
 function selectClassroom(classroomId) {
   const cls = classes.find(c => c.id === currentClassId);
   ensureSeatingByClassroom(cls);
+
+  // Prima di passare a una nuova aula, salva un'istantanea di quella
+  // lasciata: senza uno storico proprio, l'aula appena assegnata non avrebbe
+  // altrimenti nulla da mostrare scorrendo indietro (vedi getSeatingTimeline).
+  const previousClassroomId = cls.selectedClassroomId;
+  if (previousClassroomId && previousClassroomId !== classroomId) {
+    const previousSeating = cls.seatingByClassroom ? cls.seatingByClassroom[previousClassroomId] : null;
+    if (previousSeating && previousSeating.length > 0) {
+      const previousClassroom = classrooms.find(c => c.id === previousClassroomId);
+      cls.priorAulaSnapshot = {
+        classroomId: previousClassroomId,
+        classroomName: previousClassroom ? previousClassroom.name : '',
+        seating: previousSeating,
+        date: todayISO()
+      };
+    }
+  }
+
   cls.selectedClassroomId = classroomId;
-  
+
   debouncedSave();
   closeModal('selectClassroomModal');
   
@@ -1707,10 +1908,15 @@ function renderClassroomEditor() {
   classroom.desks.forEach((desk, index) => {
     const deskEl = document.createElement('div');
     deskEl.className = 'student-seat edit-mode';
-    deskEl.style.left = desk.x + 'px';
-    deskEl.style.top = desk.y + 'px';
+    const scale = getDeskScale();
+    deskEl.style.left = (desk.x * scale) + 'px';
+    deskEl.style.top = (desk.y * scale) + 'px';
+    if (scale !== 1) {
+      deskEl.style.width = (DESK_W * scale) + 'px';
+      deskEl.style.height = (DESK_H * scale) + 'px';
+    }
     deskEl.dataset.deskId = desk.id;
-    
+
     const label = document.createElement('div');
     label.className = 'student-name';
     label.textContent = `Desk ${index + 1}`;
@@ -1762,19 +1968,20 @@ function stopDragClassroomDesk() {
 function saveClassroomLayout() {
   const classroom = classrooms.find(c => c.id === currentClassroomId);
   const desks = Array.from(document.querySelectorAll('#classroomEditorChart .student-seat'));
+  const scale = getDeskScale();
 
   const teacherDeskEl = document.querySelector('#classroomEditorChart .teacher-desk');
   if (teacherDeskEl) {
     classroom.teacherDesk = {
-      x: parseInt(teacherDeskEl.style.left),
-      y: parseInt(teacherDeskEl.style.top)
+      x: Math.round(parseInt(teacherDeskEl.style.left) / scale),
+      y: Math.round(parseInt(teacherDeskEl.style.top) / scale)
     };
   }
   
   classroom.desks = desks.map(desk => ({
     id: desk.dataset.deskId,
-    x: parseInt(desk.style.left),
-    y: parseInt(desk.style.top)
+    x: Math.round(parseInt(desk.style.left) / scale),
+    y: Math.round(parseInt(desk.style.top) / scale)
   }));
   
   debouncedSave();
@@ -1833,8 +2040,13 @@ function createTeacherDeskElement(x, y, isEditable = false) {
   const desk = document.createElement('div');
   desk.className = 'teacher-desk';
   if (isEditable) desk.classList.add('edit-mode');
-  desk.style.left = x + 'px';
-  desk.style.top = y + 'px';
+  const scale = getDeskScale();
+  desk.style.left = (x * scale) + 'px';
+  desk.style.top = (y * scale) + 'px';
+  if (scale !== 1) {
+    desk.style.width = (TEACHER_DESK_W * scale) + 'px';
+    desk.style.height = (TEACHER_DESK_H * scale) + 'px';
+  }
 
   const label = document.createElement('div');
   label.className = 'teacher-desk-label';
@@ -1852,6 +2064,12 @@ function ensureSeatingByClassroom(cls) {
 
   if (cls.seating && cls.selectedClassroomId && !cls.seatingByClassroom[cls.selectedClassroomId]) {
     cls.seatingByClassroom[cls.selectedClassroomId] = cls.seating;
+    // Il campo legacy va svuotato subito dopo la migrazione: se resta
+    // valorizzato, viene ri-copiato (con storico azzerato) in QUALSIASI
+    // nuova aula assegnata in seguito alla classe, "spegnendo" la freccia
+    // indietro dello storico per quell'aula (bug: freccia visibile ma
+    // disabilitata anche con storico multi-giorno reale su un'altra aula).
+    cls.seating = null;
   }
 }
 
@@ -1925,8 +2143,13 @@ function renderSeatingChart() {
 function createSeatElement(displayName, x, y, index, deskId) {
   const seat = document.createElement('div');
   seat.className = 'student-seat';
-  seat.style.left = x + 'px';
-  seat.style.top = y + 'px';
+  const scale = getDeskScale();
+  seat.style.left = (x * scale) + 'px';
+  seat.style.top = (y * scale) + 'px';
+  if (scale !== 1) {
+    seat.style.width = (DESK_W * scale) + 'px';
+    seat.style.height = (DESK_H * scale) + 'px';
+  }
   seat.dataset.index = index;
   seat.dataset.deskId = deskId;
   
@@ -2271,11 +2494,14 @@ function randomizeSeating() {
 
 // ========== SEATING HISTORY (storico disposizioni) ==========
 // Ogni volta che una disposizione viene salvata ed è diversa dalla
-// precedente, quest'ultima viene "chiusa" con una data di fine e archiviata
-// in cls.seatingHistory[classroomId]; la nuova disposizione diventa quella
-// "attuale", con data di inizio in cls.seatingCurrentStart[classroomId].
-// Le date sono calcolate in automatico ma restano sempre modificabili a
-// mano (vedi updateSeatingHistoryDate più sotto).
+// precedente, quest'ultima viene "chiusa" e archiviata in
+// cls.seatingHistory[classroomId] — ANCHE se il salvataggio precedente era
+// dello stesso giorno, così restano tutte verificabili nello storico; la
+// nuova disposizione diventa quella "attuale", con data di inizio in
+// cls.seatingCurrentStart[classroomId]. Le date sono calcolate in automatico
+// ma restano sempre modificabili a mano (vedi updateSeatingHistoryDate più
+// sotto). Le voci archiviate nello stesso giorno condividono startDate ed
+// endDate: l'ordine cronologico tra loro è garantito da 'createdAt'.
 
 function todayISO() {
   const d = new Date();
@@ -2324,20 +2550,6 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
 
   const startDate = cls.seatingCurrentStart[classroomId] || today;
 
-  if (startDate === today) {
-    // Ritoccata più volte nello stesso giorno: si aggiorna la disposizione
-    // "attuale" senza aprire una nuova voce di storico.
-    // IMPORTANTE: va comunque scritta esplicitamente, anche quando
-    // coincide già con "oggi". Senza questa riga, una disposizione
-    // salvata PRIMA che questa funzionalità esistesse (o comunque senza
-    // una data di inizio nota) fa sì che startDate riparta da "oggi" a
-    // ogni chiamata futura: il confronto sopra risulta sempre vero e
-    // nessuna disposizione passata viene più archiviata, nemmeno cambiando
-    // giorno (bug delle frecce "indietro" sempre disabilitate).
-    cls.seatingCurrentStart[classroomId] = today;
-    return;
-  }
-
   if (!Array.isArray(cls.seatingHistory[classroomId])) cls.seatingHistory[classroomId] = [];
   let endDate = addDaysISO(today, -1);
   if (endDate < startDate) endDate = startDate;
@@ -2346,7 +2558,8 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
     id: 'seat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     seating: prevSeating,
     startDate: startDate,
-    endDate: endDate
+    endDate: endDate,
+    createdAt: Date.now()
   });
 
   cls.seatingCurrentStart[classroomId] = today;
@@ -2357,9 +2570,30 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
 function getSeatingTimeline(cls, classroomId) {
   ensureSeatingHistory(cls);
   const past = Array.isArray(cls.seatingHistory[classroomId]) ? [...cls.seatingHistory[classroomId]] : [];
-  past.sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+  // A parità di startDate (più voci archiviate lo stesso giorno) l'ordine
+  // reale è dato da createdAt, non affidabile ricavarlo dalla sola data.
+  past.sort((a, b) => {
+    if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
 
-  const timeline = past.map(e => ({ ...e, isCurrent: false }));
+  const timeline = past.map(e => ({ ...e, isCurrent: false, classroomId }));
+
+  // Aula senza storico proprio: prima di mostrare il chart vuoto, si
+  // ripesca l'ultima disposizione dell'aula usata subito prima del cambio
+  // (coi SUOI banchi, non quelli dell'aula attuale — vedi showSeatingHistoryOverlay).
+  if (past.length === 0 && cls.priorAulaSnapshot && cls.priorAulaSnapshot.classroomId !== classroomId) {
+    timeline.push({
+      id: 'prior_aula_' + cls.priorAulaSnapshot.classroomId,
+      seating: cls.priorAulaSnapshot.seating,
+      startDate: cls.priorAulaSnapshot.date,
+      endDate: cls.priorAulaSnapshot.date,
+      isCurrent: false,
+      readOnly: true,
+      classroomId: cls.priorAulaSnapshot.classroomId,
+      otherAulaName: cls.priorAulaSnapshot.classroomName
+    });
+  }
 
   const currentSeating = cls.seatingByClassroom ? cls.seatingByClassroom[classroomId] : null;
   if (currentSeating && currentSeating.length > 0) {
@@ -2368,7 +2602,8 @@ function getSeatingTimeline(cls, classroomId) {
       seating: currentSeating,
       startDate: cls.seatingCurrentStart[classroomId] || todayISO(),
       endDate: null,
-      isCurrent: true
+      isCurrent: true,
+      classroomId
     });
   }
 
@@ -2559,7 +2794,10 @@ function showSeatingHistoryOverlay(entry) {
   if (!overlay) return;
   overlay.innerHTML = '';
 
-  const classroom = classrooms.find(c => c.id === _seatingHistoryClassroomId);
+  // Le disposizioni "da un'altra aula" (fallback quando l'aula attuale non
+  // ha ancora un suo storico) vanno disegnate con i banchi di QUELL'aula,
+  // non con quelli dell'aula selezionata ora: possono avere layout diversi.
+  const classroom = classrooms.find(c => c.id === (entry.classroomId || _seatingHistoryClassroomId));
   const cls = classes.find(c => c.id === currentClassId);
   const color = cls ? classColors[cls.id] : null;
   if (color) overlay.style.setProperty('--seat-class-color', color);
@@ -2568,11 +2806,23 @@ function showSeatingHistoryOverlay(entry) {
   if (!classroom) {
     overlay.innerHTML = '<div style="text-align:center;padding:40px;color:#8a8a8a;">Aula non trovata.</div>';
   } else {
+    if (entry.otherAulaName) {
+      const badge = document.createElement('div');
+      badge.className = 'seating-history-other-aula-badge';
+      badge.textContent = `Ultima disposizione in "${entry.otherAulaName}"`;
+      overlay.appendChild(badge);
+    }
+
     const teacherDesk = getTeacherDesk(classroom);
+    const scale = getDeskScale();
     const deskEl = document.createElement('div');
     deskEl.className = 'seating-history-desk';
-    deskEl.style.left = teacherDesk.x + 'px';
-    deskEl.style.top = teacherDesk.y + 'px';
+    deskEl.style.left = (teacherDesk.x * scale) + 'px';
+    deskEl.style.top = (teacherDesk.y * scale) + 'px';
+    if (scale !== 1) {
+      deskEl.style.width = (TEACHER_DESK_W * scale) + 'px';
+      deskEl.style.height = (TEACHER_DESK_H * scale) + 'px';
+    }
     const deskLabel = document.createElement('div');
     deskLabel.className = 'seating-history-desk-label';
     deskLabel.textContent = 'Teacher Desk';
@@ -2584,8 +2834,12 @@ function showSeatingHistoryOverlay(entry) {
       const name = seatMap.get(desk.id) || '';
       const seat = document.createElement('div');
       seat.className = 'seating-history-seat' + (name ? '' : ' empty');
-      seat.style.left = desk.x + 'px';
-      seat.style.top = desk.y + 'px';
+      seat.style.left = (desk.x * scale) + 'px';
+      seat.style.top = (desk.y * scale) + 'px';
+      if (scale !== 1) {
+        seat.style.width = (DESK_W * scale) + 'px';
+        seat.style.height = (DESK_H * scale) + 'px';
+      }
       const nameEl = document.createElement('div');
       nameEl.className = 'seating-history-name';
       nameEl.textContent = name || 'Empty';
@@ -2654,10 +2908,14 @@ function updateSeatingHistoryBar() {
   prevBtn.disabled = (_seatingHistoryIndex === 0);
   nextBtn.disabled = (_seatingHistoryIndex === _seatingHistoryTimeline.length - 1);
 
+  startInput.disabled = !!entry.readOnly;
+  endInput.disabled = !!entry.readOnly;
+
   const deleteBtn = document.getElementById('seatingHistoryDeleteBtn');
   if (deleteBtn) {
-    // Si può eliminare solo una disposizione PASSATA (mai quella attuale).
-    deleteBtn.style.display = entry.isCurrent ? 'none' : '';
+    // Si può eliminare solo una disposizione PASSATA (mai quella attuale né
+    // il fallback di sola lettura sull'aula precedente).
+    deleteBtn.style.display = (entry.isCurrent || entry.readOnly) ? 'none' : '';
   }
 }
 
@@ -2667,7 +2925,7 @@ function updateSeatingHistoryBar() {
 // sostituirla basta salvare un nuovo piano banchi.
 function deleteSeatingHistoryEntry() {
   const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
-  if (!entry || entry.isCurrent) return;
+  if (!entry || entry.isCurrent || entry.readOnly) return;
 
   if (!confirm('Eliminare questa disposizione passata? L\'operazione non è reversibile.')) return;
 
@@ -2691,7 +2949,7 @@ function deleteSeatingHistoryEntry() {
 function updateSeatingHistoryDate(field, value) {
   if (!value) return;
   const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
-  if (!entry) return;
+  if (!entry || entry.readOnly) return;
 
   const cls = classes.find(c => c.id === currentClassId);
   if (!cls) return;

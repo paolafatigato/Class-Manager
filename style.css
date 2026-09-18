@@ -667,6 +667,7 @@ h2 {
 }
 
 .form-group input,
+.form-group select,
 .form-group textarea {
   width: 100%;
   padding: 11px 13px;
@@ -675,7 +676,20 @@ h2 {
   font-size: 1em;
   font-family: inherit;
   color: var(--text-dark);
+  background: var(--white);
   transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.form-group select {
+  cursor: pointer;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--glaucous);
+  box-shadow: 0 0 0 3px rgba(109, 134, 200, 0.18);
 }
 
 .form-group input:focus,
@@ -1024,7 +1038,9 @@ h2 {
 .seating-history-seat {
   position: absolute;
   background: var(--white);
-  border: 3px solid var(--seat-class-color, var(--glaucous));
+  /* Grigio, non il colore della classe: deve leggersi a colpo d'occhio
+     come una disposizione passata, mai come quella attuale. */
+  border: 3px solid #9aa0ad;
   border-radius: var(--radius-md);
   padding: 15px 20px;
   user-select: none;
@@ -1040,12 +1056,30 @@ h2 {
 }
 
 .seating-history-seat.empty {
-  background: rgba(109, 134, 200, 0.04);
-  border: 3px dashed rgba(109, 134, 200, 0.35);
+  background: rgba(154, 160, 173, 0.06);
+  border: 3px dashed rgba(154, 160, 173, 0.4);
   color: #9aa5c4;
   font-style: italic;
   font-family: var(--font-body);
   font-weight: 500;
+}
+
+/* Etichetta mostrata quando la disposizione visualizzata appartiene a
+   un'altra aula (fallback quando quella attuale non ha ancora uno storico). */
+.seating-history-other-aula-badge {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #5a6472;
+  color: var(--white);
+  font-family: var(--font-heading);
+  font-size: 0.78em;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  z-index: 4;
+  white-space: nowrap;
 }
 
 /* Pulsanti disabilitati (es. durante la navigazione nello storico):
@@ -1066,6 +1100,37 @@ h2 {
   }
   .seating-history-topbar {
     gap: 8px;
+  }
+    /* Banchi e cattedra più compatti sul cellulare: meno spazio sprecato,
+     scorrimento orizzontale più breve, testo comunque leggibile. */
+  .seating-chart {
+    padding: 16px;
+    min-height: 380px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .student-seat,
+  .seating-history-seat {
+    padding: 6px 8px;
+    border-width: 2px;
+    font-size: 0.78em;
+    border-radius: var(--radius-sm);
+  }
+
+  .teacher-desk,
+  .seating-history-desk {
+    border-width: 2px;
+  }
+
+  .teacher-desk-label,
+  .seating-history-desk-label {
+    padding: 5px 10px;
+    font-size: 0.78em;
+  }
+
+  .student-seat.student-mode .student-name {
+    padding: 5px 8px;
+    font-size: 0.95em;
   }
 }
 
