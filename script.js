@@ -1349,7 +1349,7 @@ function _parseNum(v) {
  * Calcola il voto finale (0-10) di uno studente per un test, dato il grading snapshot.
  * fullName è la chiave usata da entrambi i sistemi (es. "Rossi Mario").
  */
-function _computeFinalScore(studentId, test, gradingScores, gradingTestVersions) {
+function _computeFinalScore(studentId, test, gradingScores, gradingTestVersions, gradingChecks) {
   const allScores = gradingScores?.[studentId];
   if (!allScores || !allScores[test.id]) return null;
   const testScores = allScores[test.id];
@@ -1410,7 +1410,22 @@ function _computeFinalScore(studentId, test, gradingScores, gradingTestVersions)
   });
 
   if (weightedMaxSum === 0) return null;
-  return (weightedSum * 10) / weightedMaxSum;
+  const baseScore = (weightedSum * 10) / weightedMaxSum;
+
+  // Bonus/malus della spunta ⌛ impostato in Teacher Registro (stessa regola):
+  // conta solo se lo studente ha la spunta E almeno un voto inserito.
+  const bonus = Number(test.checkBonus) || 0;
+  if (bonus !== 0 && gradingChecks?.[studentId]?.[test.id]?.checked) {
+    const hasAnyScore = sections.some(section => {
+      const s = testScores[section.id];
+      if (!s) return false;
+      return (section.subsections || []).length > 0
+        ? section.subsections.some(sub => _parseNum(s.subsections?.[sub.id]) !== null)
+        : _parseNum(s.direct) !== null;
+    });
+    if (hasAnyScore) return Math.min(10, Math.max(0, baseScore + bonus));
+  }
+  return baseScore;
 }
 
 /**
@@ -1424,7 +1439,7 @@ function computeStudentAverage(fullName, gradingData) {
 
   const activeTests = gradingData.tests.filter(test => !test.archived);
   const finals = activeTests
-    .map(test => _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions))
+    .map(test => _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions, gradingData.checks))
     .filter(v => v !== null && v > 2);
 
   if (finals.length === 0) return null;
@@ -1440,7 +1455,7 @@ function computeStudentScoreForTest(fullName, testId, gradingData) {
   if (!gradingData.scores[fullName]) return null;
   const test = gradingData.tests.find(t => t.id === testId);
   if (!test) return null;
-  const score = _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions);
+  const score = _computeFinalScore(fullName, test, gradingData.scores, gradingData.testVersions, gradingData.checks);
   return (score !== null && score > 2) ? score : null;
 }
 
@@ -1470,7 +1485,7 @@ async function _populateGroupTestSelect() {
     const gradingData = await _getGradingData();
     const tests = (gradingData?.tests || []).filter(test =>
       cls.students.some(s =>
-        _computeFinalScore(s.fullName, test, gradingData.scores, gradingData.testVersions) !== null
+        _computeFinalScore(s.fullName, test, gradingData.scores, gradingData.testVersions, gradingData.checks) !== null
       )
     );
 
