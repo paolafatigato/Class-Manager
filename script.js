@@ -1212,8 +1212,24 @@ function selectClassroom(classroomId) {
   // altrimenti nulla da mostrare scorrendo indietro (vedi getSeatingTimeline).
   const previousClassroomId = cls.selectedClassroomId;
   if (previousClassroomId && previousClassroomId !== classroomId) {
-    const previousSeating = cls.seatingByClassroom ? cls.seatingByClassroom[previousClassroomId] : null;
-    if (previousSeating && previousSeating.length > 0) {
+    // Legge il chart REALE a video, non solo l'eventuale layout già salvato:
+    // se l'utente non ha ancora premuto "Save Seating Layout" in
+    // quest'aula, cls.seatingByClassroom[previousClassroomId] è vuoto anche
+    // se sui banchi ci sono davvero degli alunni assegnati.
+    const liveSeats = Array.from(document.querySelectorAll('#seatingChart .student-seat'));
+    let previousSeating = liveSeats.length
+      ? liveSeats.map(seat => ({
+          displayName: seat.querySelector('.student-name')?.dataset.name || '',
+          deskId: seat.dataset.deskId
+        }))
+      : null;
+    if (!previousSeating || !previousSeating.some(s => s.displayName)) {
+      previousSeating = cls.seatingByClassroom ? cls.seatingByClassroom[previousClassroomId] : null;
+    }
+
+    // Un'istantanea con tutti i banchi vuoti non è utile da mostrare come
+    // "ultima disposizione": meglio non mostrare nulla che uno storico vuoto.
+    if (previousSeating && previousSeating.some(s => s.displayName)) {
       const previousClassroom = classrooms.find(c => c.id === previousClassroomId);
       cls.priorAulaSnapshot = {
         classroomId: previousClassroomId,
