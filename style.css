@@ -1002,8 +1002,31 @@ h2 {
   z-index: 3;
 }
 
+/* Resa da "screenshot in bianco e nero": fondo pieno (nessuna trasparenza)
+   e tutto in scala di grigi, cattedra compresa. */
 .seating-history-overlay.active {
   display: block;
+  background: #fff;
+  filter: grayscale(1) contrast(1.05);
+  cursor: default;
+}
+
+/* Mentre si guarda una disposizione passata, il piano attuale sotto
+   l'overlay sparisce del tutto: niente banchi che traspaiono. */
+.seating-chart-slot.history-active #seatingChart > * {
+  visibility: hidden;
+}
+
+.seating-history-readonly {
+  display: none;
+  background: #ececec;
+  color: #444;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 /* Anteprima di sola lettura: stessa resa visiva di .teacher-desk /
@@ -1056,8 +1079,8 @@ h2 {
 }
 
 .seating-history-seat.empty {
-  background: rgba(154, 160, 173, 0.06);
-  border: 3px dashed rgba(154, 160, 173, 0.4);
+  background: #fafafa;
+  border: 3px dashed #b5b5b5;
   color: #9aa5c4;
   font-style: italic;
   font-family: var(--font-body);

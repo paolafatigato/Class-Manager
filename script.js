@@ -1,9 +1,17 @@
 // ====== PRINT FUNCTIONS ======
 function printClassLayout() {
-  const chart = document.getElementById('seatingChart');
+  // Se si sta sfogliando una disposizione passata si stampa quella.
+  const overlay = document.getElementById('seatingHistoryOverlay');
+  const showingHistory = overlay && overlay.classList.contains('active');
+  const chart = showingHistory ? overlay : document.getElementById('seatingChart');
   if (!chart) return;
   // Clona il seating chart
   const clone = chart.cloneNode(true);
+  if (showingHistory) {
+    clone.style.position = 'relative';
+    clone.style.inset = 'auto';
+    clone.style.height = (chart.scrollHeight) + 'px';
+  }
   // Rimuovi bottoni e controlli
   clone.querySelectorAll('button, .selection-box').forEach(el => el.remove());
   // Prepara contenuto per stampa
@@ -2129,9 +2137,10 @@ function renderSeatingChart() {
   const savedSeating = cls.seatingByClassroom?.[cls.selectedClassroomId] || null;
 
   if (savedSeating && savedSeating.length > 0) {
-    classroom.desks.forEach((desk, index) => {
-      const savedSeat = savedSeating.find(s => s.deskId === desk.id);
-      createSeatElement(savedSeat?.displayName || '', desk.x, desk.y, index, desk.id);
+    // Banchi nelle posizioni salvate con la disposizione (se spostati con
+    // "Edit Desks"), non in quelle di partenza dell'aula.
+    normalizeSeatingForRoom(savedSeating, classroom).forEach((seat, index) => {
+      createSeatElement(seat.displayName, seat.x, seat.y, index, seat.deskId);
     });
   } else {
     const shuffled = [...cls.students].sort(() => Math.random() - 0.5);
@@ -2156,7 +2165,12 @@ function createSeatElement(displayName, x, y, index, deskId) {
   }
   seat.dataset.index = index;
   seat.dataset.deskId = deskId;
-  
+  // Coordinate di origine: vedi seatElementPosition.
+  seat.dataset.x = x;
+  seat.dataset.y = y;
+  seat.dataset.renderLeft = seat.style.left;
+  seat.dataset.renderTop = seat.style.top;
+
   const isEmpty = !displayName;
   if (isEmpty) seat.classList.add('empty');
   
@@ -2528,29 +2542,49 @@ function ensureSeatingHistory(cls) {
   }
 }
 
-// Firma "chi siede su quale banco", indipendente dall'ordine degli elementi:
-// due disposizioni con la stessa firma sono considerate identiche. I banchi
-// vuoti non contano (un banco vuoto aggiunto all'aula non è una modifica).
-function seatingSignature(seating) {
-  return (seating || [])
-    .filter(s => s.displayName)
-    .map(s => `${s.deskId}:${s.displayName}`)
+// Disposizione "completa" per un'aula: un elemento per ogni banco dell'aula,
+// con la posizione salvata nella disposizione (i banchi spostati con
+// "Edit Desks" nel piano della classe) o, se manca, quella dell'aula.
+// È esattamente ciò che renderSeatingChart disegna a video.
+function normalizeSeatingForRoom(seating, classroom) {
+  if (!classroom || !Array.isArray(classroom.desks)) return seating || [];
+  // A parità di id vince il PRIMO elemento: nelle disposizioni salvate da
+  // vecchie versioni i doppioni successivi sono i banchi vuoti dell'editor
+  // aule (vedi dropOverlappingEmptyDesks), non quelli veri.
+  const byDesk = new Map();
+  (seating || []).forEach(s => { if (!byDesk.has(s.deskId)) byDesk.set(s.deskId, s); });
+  return classroom.desks.map(d => {
+    const s = byDesk.get(d.id);
+    return {
+      deskId: d.id,
+      x: s && Number.isFinite(s.x) ? s.x : d.x,
+      y: s && Number.isFinite(s.y) ? s.y : d.y,
+      displayName: (s && s.displayName) || ''
+    };
+  });
+}
+
+// Firma "chi siede su quale banco e dove si trova ogni banco", indipendente
+// dall'ordine degli elementi: due disposizioni con la stessa firma sono
+// considerate identiche. Anche spostare solo i banchi è una modifica.
+function seatingSignature(seating, classroom) {
+  return normalizeSeatingForRoom(seating, classroom)
+    .map(s => `${s.deskId}@${Math.round(s.x)},${Math.round(s.y)}:${s.displayName || ''}`)
     .sort()
     .join('|');
 }
 
-// "Foto" dell'aula al momento dell'archiviazione: posizioni dei banchi e
-// della cattedra copiate nella voce di storico, così la disposizione resta
-// visibile identica anche se poi l'aula viene modificata, rigenerata o
-// cambiata (gli id dei banchi, desk_0, desk_1..., non sono stabili).
+// "Foto" dell'aula al momento dell'archiviazione: posizioni dei banchi (così
+// come erano nel piano della classe) e della cattedra copiate nella voce di
+// storico, così la disposizione resta visibile identica anche se poi l'aula
+// viene modificata, rigenerata o cambiata.
 function buildClassroomSnapshot(classroomId, seating) {
   const classroom = classrooms.find(c => c.id === classroomId);
-  const nameByDesk = new Map((seating || []).map(s => [s.deskId, s.displayName || '']));
   return {
     classroomName: classroom ? classroom.name : '',
     teacherDesk: classroom ? { ...getTeacherDesk(classroom) } : null,
     desks: classroom
-      ? classroom.desks.map(d => ({ id: d.id, x: d.x, y: d.y, displayName: nameByDesk.get(d.id) || '' }))
+      ? normalizeSeatingForRoom(seating, classroom).map(s => ({ id: s.deskId, x: s.x, y: s.y, displayName: s.displayName }))
       : null
   };
 }
@@ -2565,7 +2599,8 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
     return;
   }
 
-  if (seatingSignature(prevSeating) === seatingSignature(newSeating)) {
+  const classroom = classrooms.find(c => c.id === classroomId);
+  if (seatingSignature(prevSeating, classroom) === seatingSignature(newSeating, classroom)) {
     if (!cls.seatingCurrentStart[classroomId]) cls.seatingCurrentStart[classroomId] = today;
     return;
   }
@@ -2663,8 +2698,25 @@ function getSeatingTimeline(cls, classroomId) {
 function readLiveSeating() {
   return Array.from(document.querySelectorAll('#seatingChart .student-seat')).map(seat => ({
     displayName: seat.querySelector('.student-name')?.dataset.name || '',
+    ...seatElementPosition(seat),
     deskId: seat.dataset.deskId
   }));
+}
+
+// Posizione (non scalata) di un banco a video. Se il banco non è stato
+// spostato si riusano le coordinate da cui è stato disegnato: ricalcolarle
+// da style.left con la scala mobile introdurrebbe arrotondamenti e una
+// falsa "modifica non salvata".
+function seatElementPosition(seat) {
+  if (seat.dataset.renderLeft === seat.style.left && seat.dataset.renderTop === seat.style.top &&
+      seat.dataset.x !== undefined && seat.dataset.y !== undefined) {
+    return { x: Number(seat.dataset.x), y: Number(seat.dataset.y) };
+  }
+  const scale = getDeskScale();
+  return {
+    x: Math.round(parseInt(seat.style.left) / scale),
+    y: Math.round(parseInt(seat.style.top) / scale)
+  };
 }
 
 // true se a video c'è una disposizione diversa da quella salvata per l'aula
@@ -2677,7 +2729,8 @@ function hasUnsavedSeatingChanges() {
   const live = readLiveSeating();
   if (!live.some(s => s.displayName)) return false;
   const saved = cls.seatingByClassroom ? cls.seatingByClassroom[cls.selectedClassroomId] : null;
-  return seatingSignature(live) !== seatingSignature(saved);
+  const classroom = classrooms.find(c => c.id === cls.selectedClassroomId);
+  return seatingSignature(live, classroom) !== seatingSignature(saved, classroom);
 }
 
 function confirmLeaveUnsavedSeating() {
@@ -2693,27 +2746,17 @@ window.addEventListener('beforeunload', (e) => {
 
 function saveSeating() {
   const cls = classes.find(c => c.id === currentClassId);
-  const seats = Array.from(document.querySelectorAll('#seatingChart .student-seat'));
-  const scale = getDeskScale();
-
   ensureSeatingByClassroom(cls);
   if (!cls.selectedClassroomId) {
     alert('Please select a classroom before saving the layout.');
     return;
   }
 
-  const newSeating = seats.map(seat => {
-    const nameEl = seat.querySelector('.student-name');
-    return {
-      displayName: nameEl.dataset.name || '',
-      x: Math.round(parseInt(seat.style.left) / scale),
-      y: Math.round(parseInt(seat.style.top) / scale),
-      deskId: seat.dataset.deskId
-    };
-  });
+  const newSeating = readLiveSeating();
 
   const roomId = cls.selectedClassroomId;
-  const changed = seatingSignature(cls.seatingByClassroom[roomId]) !== seatingSignature(newSeating);
+  const classroom = classrooms.find(c => c.id === roomId);
+  const changed = seatingSignature(cls.seatingByClassroom[roomId], classroom) !== seatingSignature(newSeating, classroom);
   archiveSeatingIfChanged(cls, roomId, newSeating);
 
   cls.seatingByClassroom[roomId] = newSeating;
@@ -2926,14 +2969,24 @@ function showSeatingHistoryOverlay(entry) {
   if (color) overlay.style.setProperty('--seat-class-color', color);
   else overlay.style.removeProperty('--seat-class-color');
 
-  // Banchi da disegnare: la "foto" salvata con la voce se c'è (resta
-  // identica anche se l'aula è stata poi modificata o eliminata), altrimenti
-  // i banchi attuali dell'aula. Per le voci vecchie senza foto, se gli id dei
-  // banchi non corrispondono più si usano le posizioni salvate nella voce.
+  // Banchi da disegnare, dal più fedele al meno fedele:
+  // 1) le posizioni registrate nella disposizione stessa al momento del
+  //    salvataggio (= dove stavano davvero i banchi quella settimana, anche
+  //    se spostati con "Edit Desks");
+  // 2) la "foto" dell'aula salvata con la voce;
+  // 3) i banchi attuali dell'aula (voci molto vecchie).
   const seating = entry.seating || [];
   let desks = null;
   let teacherDesk = entry.teacherDesk || null;
-  if (Array.isArray(entry.desks) && entry.desks.length) {
+  if (seating.length && seating.every(s => Number.isFinite(s.x) && Number.isFinite(s.y))) {
+    // Un solo banco per id: i doppioni sono i banchi dell'editor aule finiti
+    // nel salvataggio (vedi dropOverlappingEmptyDesks), che nel DOM
+    // venivano dopo quelli veri del piano della classe.
+    const seen = new Set();
+    desks = seating
+      .filter(s => !s.deskId || (!seen.has(s.deskId) && seen.add(s.deskId)))
+      .map(s => ({ x: s.x, y: s.y, name: s.displayName || '' }));
+  } else if (Array.isArray(entry.desks) && entry.desks.length) {
     desks = entry.desks.map(d => ({ x: d.x, y: d.y, name: d.displayName || '' }));
   } else if (classroom) {
     const seatMap = new Map(seating.map(s => [s.deskId, s.displayName]));
@@ -2945,6 +2998,7 @@ function showSeatingHistoryOverlay(entry) {
     }
   }
   if (!teacherDesk && classroom) teacherDesk = getTeacherDesk(classroom);
+  if (desks) desks = dropOverlappingEmptyDesks(desks);
 
   if (!desks) {
     overlay.innerHTML = '<div style="text-align:center;padding:40px;color:#8a8a8a;">Aula non trovata.</div>';
@@ -2992,6 +3046,20 @@ function showSeatingHistoryOverlay(entry) {
   }
 
   overlay.classList.add('active');
+  overlay.parentElement?.classList.add('history-active');
+  overlay.scrollTop = 0;
+  overlay.scrollLeft = 0;
+
+  // Una disposizione passata è in sola lettura: si escono dalle modalità
+  // di modifica del piano attuale (che resta intatto, nascosto, sotto).
+  if (editMode || studentMode) {
+    editMode = false;
+    studentMode = false;
+    clearSeatSelection();
+    stopSelection();
+    updateModeButtons();
+    updateSeatStyles();
+  }
   setSeatingControlsEnabled(false);
 
   // Una disposizione di un'altra aula può essere più "lunga" del piano
@@ -3006,10 +3074,29 @@ function showSeatingHistoryOverlay(entry) {
   }
 }
 
+// Le disposizioni salvate da una vecchia versione di saveSeating (selettore
+// '.student-seat' non ristretto a #seatingChart) contengono anche i banchi,
+// tutti vuoti, dell'editor delle aule nascosto nella pagina, nelle posizioni
+// originali dell'aula. Nell'anteprima un banco vuoto che si sovrappone a un
+// banco occupato (o a un altro già disegnato) non è mai un banco reale: si
+// scarta. Prima i banchi occupati, poi i vuoti, in ordine.
+function dropOverlappingEmptyDesks(desks) {
+  const overlaps = (a, b) =>
+    // sovrapposizione reale dei rettangoli; i banchi che si toccano soltanto
+    // (accostati a coppie/isole) non contano
+    Math.abs(a.x - b.x) < DESK_W - 6 && Math.abs(a.y - b.y) < DESK_H - 6;
+  const kept = desks.filter(d => d.name);
+  desks.filter(d => !d.name).forEach(d => {
+    if (!kept.some(k => overlaps(k, d))) kept.push(d);
+  });
+  return kept;
+}
+
 function hideSeatingHistoryOverlay() {
   const overlay = document.getElementById('seatingHistoryOverlay');
   if (overlay) {
     overlay.classList.remove('active');
+    overlay.parentElement?.classList.remove('history-active');
     overlay.innerHTML = '';
   }
   const chart = document.getElementById('seatingChart');
@@ -3021,7 +3108,7 @@ function hideSeatingHistoryOverlay() {
 // modificherebbero il piano banchi "attuale" senza che l'utente lo veda
 // (l'overlay lo nasconde alla vista, ma il chart vero resta sotto).
 function setSeatingControlsEnabled(enabled) {
-  ['editModeBtn', 'studentModeBtn', 'randomizeSeatingBtn', 'saveSeatingBtn'].forEach(id => {
+  ['editModeBtn', 'studentModeBtn', 'randomizeSeatingBtn', 'groupsBtn', 'saveSeatingBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.disabled = !enabled;
@@ -3052,12 +3139,15 @@ function updateSeatingHistoryBar() {
   const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
   startInput.value = entry.startDate || '';
 
+  const readonlyLabel = document.getElementById('seatingHistoryReadonlyLabel');
   if (entry.isCurrent) {
     endWrap.style.display = 'none';
     ongoingLabel.style.display = '';
+    if (readonlyLabel) readonlyLabel.style.display = 'none';
   } else {
-    endWrap.style.display = '';
+    endWrap.style.display = entry.endDate ? '' : 'none';
     ongoingLabel.style.display = 'none';
+    if (readonlyLabel) readonlyLabel.style.display = '';
     endInput.value = entry.endDate || '';
   }
 
@@ -3069,9 +3159,9 @@ function updateSeatingHistoryBar() {
 
   const deleteBtn = document.getElementById('seatingHistoryDeleteBtn');
   if (deleteBtn) {
-    // Si può eliminare solo una disposizione PASSATA (mai quella attuale né
-    // il fallback di sola lettura sull'aula precedente).
-    deleteBtn.style.display = (entry.isCurrent || entry.readOnly) ? 'none' : '';
+    // Si può eliminare solo una disposizione PASSATA (mai quella attuale).
+    // Display esplicito: con '' varrebbe il display:none del CSS.
+    deleteBtn.style.display = entry.isCurrent ? 'none' : 'inline-block';
   }
 }
 
@@ -3081,7 +3171,7 @@ function updateSeatingHistoryBar() {
 // sostituirla basta salvare un nuovo piano banchi.
 function deleteSeatingHistoryEntry() {
   const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
-  if (!entry || entry.isCurrent || entry.readOnly) return;
+  if (!entry || entry.isCurrent) return;
 
   if (!confirm('Eliminare questa disposizione passata? L\'operazione non è reversibile.')) return;
 
@@ -3089,14 +3179,33 @@ function deleteSeatingHistoryEntry() {
   if (!cls || !_seatingHistoryClassroomId) return;
   ensureSeatingHistory(cls);
 
-  const list = cls.seatingHistory[entry.classroomId || _seatingHistoryClassroomId] || [];
-  const idx = list.findIndex(e => e.id === entry.id);
-  if (idx === -1) return;
+  const roomId = entry.classroomId || _seatingHistoryClassroomId;
+  if (entry.id === 'other_aula_' + roomId) {
+    // Ultima disposizione salvata in un'altra aula (vedi getSeatingTimeline):
+    // eliminarla significa togliere la disposizione salvata di quell'aula.
+    if (cls.seatingByClassroom) delete cls.seatingByClassroom[roomId];
+    delete cls.seatingCurrentStart[roomId];
+    if (cls.seatingCurrentCreatedAt) delete cls.seatingCurrentCreatedAt[roomId];
+  } else {
+    const list = cls.seatingHistory[roomId] || [];
+    const idx = list.findIndex(e => e.id === entry.id);
+    if (idx === -1) return;
+    list.splice(idx, 1);
+  }
 
-  list.splice(idx, 1);
-
+  const oldIndex = _seatingHistoryIndex;
   debouncedSave();
   resetSeatingHistoryView(cls, _seatingHistoryClassroomId);
+
+  // Si resta nello storico, sulla disposizione precedente a quella
+  // eliminata (o sulla successiva se era la più vecchia).
+  const target = Math.max(0, Math.min(oldIndex - 1, _seatingHistoryTimeline.length - 1));
+  const targetEntry = _seatingHistoryTimeline[target];
+  if (targetEntry && !targetEntry.isCurrent) {
+    _seatingHistoryIndex = target;
+    showSeatingHistoryOverlay(targetEntry);
+    updateSeatingHistoryBar();
+  }
 }
 
 // Modifica manuale della data di inizio/fine della disposizione mostrata.

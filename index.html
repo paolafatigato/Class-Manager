@@ -114,7 +114,7 @@
           <button class="btn btn-small btn-classroom" onclick="toggleStudentMode()" id="studentModeBtn">👥 Move Students</button>
           <button class="btn btn-small btn-classroom" onclick="randomizeSeating()" id="randomizeSeatingBtn">🎲 Randomize Students</button>
           <button class="btn btn-small btn-classroom" onclick="showWheel()">🎡 Student Picker</button>
-          <button class="btn btn-small btn-classroom" onclick="showGroupModal()">👫 Crea Gruppi</button>
+          <button class="btn btn-small btn-classroom" onclick="showGroupModal()" id="groupsBtn">👫 Crea Gruppi</button>
           <button class="btn btn-small btn-classroom" onclick="saveSeating()" id="saveSeatingBtn">💾 Save Layout</button>
           <button class="btn btn-small btn-print" onclick="printClassLayout()" title="Stampa layout classe"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
         </div>
@@ -129,6 +129,7 @@
           <input type="date" id="seatingHistoryEndInput" class="seating-history-date-input" onchange="updateSeatingHistoryDate('end', this.value)">
         </span>
         <span id="seatingHistoryOngoingLabel" class="seating-history-ongoing">In corso</span>
+        <span id="seatingHistoryReadonlyLabel" class="seating-history-readonly">📷 Archiviata · sola lettura</span>
         <button type="button" class="btn btn-small btn-danger seating-history-delete-btn" id="seatingHistoryDeleteBtn" onclick="deleteSeatingHistoryEntry()" title="Elimina questa disposizione passata">🗑️ Elimina</button>
       </div>
 
@@ -363,6 +364,7 @@
     });
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {
+      if (!confirmLeaveUnsavedSeating()) return;
       try {
         await signOut(auth);
       } catch (error) {
