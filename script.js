@@ -903,6 +903,7 @@ function openClass(classId) {
 }
 
 function showHomePage() {
+  if (!confirmLeaveUnsavedSeating()) return;
   document.getElementById('classPage').classList.add('hidden');
   document.getElementById('homePage').classList.remove('hidden');
   currentClassId = null;
@@ -1207,38 +1208,10 @@ function selectClassroom(classroomId) {
   const cls = classes.find(c => c.id === currentClassId);
   ensureSeatingByClassroom(cls);
 
-  // Prima di passare a una nuova aula, salva un'istantanea di quella
-  // lasciata: senza uno storico proprio, l'aula appena assegnata non avrebbe
-  // altrimenti nulla da mostrare scorrendo indietro (vedi getSeatingTimeline).
-  const previousClassroomId = cls.selectedClassroomId;
-  if (previousClassroomId && previousClassroomId !== classroomId) {
-    // Legge il chart REALE a video, non solo l'eventuale layout già salvato:
-    // se l'utente non ha ancora premuto "Save Seating Layout" in
-    // quest'aula, cls.seatingByClassroom[previousClassroomId] è vuoto anche
-    // se sui banchi ci sono davvero degli alunni assegnati.
-    const liveSeats = Array.from(document.querySelectorAll('#seatingChart .student-seat'));
-    let previousSeating = liveSeats.length
-      ? liveSeats.map(seat => ({
-          displayName: seat.querySelector('.student-name')?.dataset.name || '',
-          deskId: seat.dataset.deskId
-        }))
-      : null;
-    if (!previousSeating || !previousSeating.some(s => s.displayName)) {
-      previousSeating = cls.seatingByClassroom ? cls.seatingByClassroom[previousClassroomId] : null;
-    }
-
-    // Un'istantanea con tutti i banchi vuoti non è utile da mostrare come
-    // "ultima disposizione": meglio non mostrare nulla che uno storico vuoto.
-    if (previousSeating && previousSeating.some(s => s.displayName)) {
-      const previousClassroom = classrooms.find(c => c.id === previousClassroomId);
-      cls.priorAulaSnapshot = {
-        classroomId: previousClassroomId,
-        classroomName: previousClassroom ? previousClassroom.name : '',
-        seating: previousSeating,
-        date: todayISO()
-      };
-    }
-  }
+  // Cambiando aula la disposizione non salvata a video andrebbe persa.
+  // Le disposizioni SALVATE delle altre aule restano invece nello storico
+  // della classe (vedi getSeatingTimeline), non serve copiarle qui.
+  if (cls.selectedClassroomId !== classroomId && !confirmLeaveUnsavedSeating()) return;
 
   cls.selectedClassroomId = classroomId;
 
@@ -2556,12 +2529,30 @@ function ensureSeatingHistory(cls) {
 }
 
 // Firma "chi siede su quale banco", indipendente dall'ordine degli elementi:
-// due disposizioni con la stessa firma sono considerate identiche.
+// due disposizioni con la stessa firma sono considerate identiche. I banchi
+// vuoti non contano (un banco vuoto aggiunto all'aula non è una modifica).
 function seatingSignature(seating) {
   return (seating || [])
-    .map(s => `${s.deskId}:${s.displayName || ''}`)
+    .filter(s => s.displayName)
+    .map(s => `${s.deskId}:${s.displayName}`)
     .sort()
     .join('|');
+}
+
+// "Foto" dell'aula al momento dell'archiviazione: posizioni dei banchi e
+// della cattedra copiate nella voce di storico, così la disposizione resta
+// visibile identica anche se poi l'aula viene modificata, rigenerata o
+// cambiata (gli id dei banchi, desk_0, desk_1..., non sono stabili).
+function buildClassroomSnapshot(classroomId, seating) {
+  const classroom = classrooms.find(c => c.id === classroomId);
+  const nameByDesk = new Map((seating || []).map(s => [s.deskId, s.displayName || '']));
+  return {
+    classroomName: classroom ? classroom.name : '',
+    teacherDesk: classroom ? { ...getTeacherDesk(classroom) } : null,
+    desks: classroom
+      ? classroom.desks.map(d => ({ id: d.id, x: d.x, y: d.y, displayName: nameByDesk.get(d.id) || '' }))
+      : null
+  };
 }
 
 function archiveSeatingIfChanged(cls, classroomId, newSeating) {
@@ -2588,43 +2579,56 @@ function archiveSeatingIfChanged(cls, classroomId, newSeating) {
   cls.seatingHistory[classroomId].push({
     id: 'seat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     seating: prevSeating,
+    ...buildClassroomSnapshot(classroomId, prevSeating),
     startDate: startDate,
     endDate: endDate,
-    createdAt: Date.now()
+    createdAt: (cls.seatingCurrentCreatedAt && cls.seatingCurrentCreatedAt[classroomId]) || Date.now()
   });
 
   cls.seatingCurrentStart[classroomId] = today;
 }
 
-// Sequenza cronologica completa (storico + disposizione attuale) per
-// un'aula, usata dal browser dello storico.
+// Sequenza cronologica completa della CLASSE (non della sola aula): storico
+// di tutte le aule + ultima disposizione salvata nelle altre aule + quella
+// attuale. Così, cambiando aula, la freccia "indietro" mostra comunque la
+// disposizione salvata prima del cambio, coi banchi della SUA aula.
 function getSeatingTimeline(cls, classroomId) {
   ensureSeatingHistory(cls);
-  const past = Array.isArray(cls.seatingHistory[classroomId]) ? [...cls.seatingHistory[classroomId]] : [];
-  // A parità di startDate (più voci archiviate lo stesso giorno) l'ordine
-  // reale è dato da createdAt, non affidabile ricavarlo dalla sola data.
-  past.sort((a, b) => {
-    if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
-    return (a.createdAt || 0) - (b.createdAt || 0);
+  const createdAtMap = cls.seatingCurrentCreatedAt || {};
+  const timeline = [];
+
+  Object.keys(cls.seatingHistory).forEach(roomId => {
+    const list = Array.isArray(cls.seatingHistory[roomId]) ? cls.seatingHistory[roomId] : [];
+    list.forEach(e => timeline.push({ ...e, isCurrent: false, classroomId: roomId }));
   });
 
-  const timeline = past.map(e => ({ ...e, isCurrent: false, classroomId }));
-
-  // Aula senza storico proprio: prima di mostrare il chart vuoto, si
-  // ripesca l'ultima disposizione dell'aula usata subito prima del cambio
-  // (coi SUOI banchi, non quelli dell'aula attuale — vedi showSeatingHistoryOverlay).
-  if (past.length === 0 && cls.priorAulaSnapshot && cls.priorAulaSnapshot.classroomId !== classroomId) {
+  // Disposizioni salvate in aule diverse da quella attuale: restano le
+  // "attuali" di quelle aule (si ritrovano tornandoci), qui in sola lettura.
+  Object.keys(cls.seatingByClassroom || {}).forEach(roomId => {
+    if (roomId === classroomId) return;
+    const seating = cls.seatingByClassroom[roomId];
+    if (!Array.isArray(seating) || !seating.some(s => s.displayName)) return;
     timeline.push({
-      id: 'prior_aula_' + cls.priorAulaSnapshot.classroomId,
-      seating: cls.priorAulaSnapshot.seating,
-      startDate: cls.priorAulaSnapshot.date,
-      endDate: cls.priorAulaSnapshot.date,
+      id: 'other_aula_' + roomId,
+      seating,
+      ...buildClassroomSnapshot(roomId, seating),
+      startDate: cls.seatingCurrentStart[roomId] || '',
+      endDate: null,
+      createdAt: createdAtMap[roomId] || 0,
       isCurrent: false,
       readOnly: true,
-      classroomId: cls.priorAulaSnapshot.classroomId,
-      otherAulaName: cls.priorAulaSnapshot.classroomName
+      classroomId: roomId
     });
-  }
+  });
+
+  // A parità di startDate (più voci archiviate lo stesso giorno) l'ordine
+  // reale è dato da createdAt, non affidabile ricavarlo dalla sola data.
+  timeline.sort((a, b) => {
+    const sa = a.startDate || '';
+    const sb = b.startDate || '';
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
 
   const currentSeating = cls.seatingByClassroom ? cls.seatingByClassroom[classroomId] : null;
   if (currentSeating && currentSeating.length > 0) {
@@ -2636,48 +2640,107 @@ function getSeatingTimeline(cls, classroomId) {
       isCurrent: true,
       classroomId
     });
+  } else if (timeline.length) {
+    // Aula mai salvata: la voce "attuale" è il chart a video (non salvato).
+    // Senza di essa l'indice partirebbe sull'ultima disposizione passata
+    // pur mostrando il chart vivo, e la freccia "indietro" la salterebbe.
+    timeline.push({
+      id: 'current',
+      seating: [],
+      startDate: todayISO(),
+      endDate: null,
+      isCurrent: true,
+      readOnly: true,
+      classroomId
+    });
   }
 
   return timeline;
 }
 
+// Disposizione attualmente a video nel piano banchi (solo #seatingChart,
+// mai l'editor delle aule né l'overlay dello storico).
+function readLiveSeating() {
+  return Array.from(document.querySelectorAll('#seatingChart .student-seat')).map(seat => ({
+    displayName: seat.querySelector('.student-name')?.dataset.name || '',
+    deskId: seat.dataset.deskId
+  }));
+}
+
+// true se a video c'è una disposizione diversa da quella salvata per l'aula
+// selezionata (anche quella mescolata in automatico in un'aula mai salvata).
+function hasUnsavedSeatingChanges() {
+  const classPage = document.getElementById('classPage');
+  if (!currentClassId || !classPage || classPage.classList.contains('hidden')) return false;
+  const cls = classes.find(c => c.id === currentClassId);
+  if (!cls || !cls.selectedClassroomId) return false;
+  const live = readLiveSeating();
+  if (!live.some(s => s.displayName)) return false;
+  const saved = cls.seatingByClassroom ? cls.seatingByClassroom[cls.selectedClassroomId] : null;
+  return seatingSignature(live) !== seatingSignature(saved);
+}
+
+function confirmLeaveUnsavedSeating() {
+  if (!hasUnsavedSeatingChanges()) return true;
+  return confirm('La disposizione dei banchi non è stata salvata.\nSei sicura di voler uscire senza salvare?');
+}
+
+window.addEventListener('beforeunload', (e) => {
+  if (!hasUnsavedSeatingChanges()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
 function saveSeating() {
   const cls = classes.find(c => c.id === currentClassId);
-  const seats = Array.from(document.querySelectorAll('.student-seat'));
+  const seats = Array.from(document.querySelectorAll('#seatingChart .student-seat'));
+  const scale = getDeskScale();
 
   ensureSeatingByClassroom(cls);
   if (!cls.selectedClassroomId) {
     alert('Please select a classroom before saving the layout.');
     return;
   }
-  
+
   const newSeating = seats.map(seat => {
     const nameEl = seat.querySelector('.student-name');
     return {
       displayName: nameEl.dataset.name || '',
-      x: parseInt(seat.style.left),
-      y: parseInt(seat.style.top),
+      x: Math.round(parseInt(seat.style.left) / scale),
+      y: Math.round(parseInt(seat.style.top) / scale),
       deskId: seat.dataset.deskId
     };
   });
 
-  archiveSeatingIfChanged(cls, cls.selectedClassroomId, newSeating);
+  const roomId = cls.selectedClassroomId;
+  const changed = seatingSignature(cls.seatingByClassroom[roomId]) !== seatingSignature(newSeating);
+  archiveSeatingIfChanged(cls, roomId, newSeating);
 
-  cls.seatingByClassroom[cls.selectedClassroomId] = newSeating;
-  
+  cls.seatingByClassroom[roomId] = newSeating;
+  if (!cls.seatingCurrentCreatedAt || typeof cls.seatingCurrentCreatedAt !== 'object') cls.seatingCurrentCreatedAt = {};
+  if (changed || !cls.seatingCurrentCreatedAt[roomId]) cls.seatingCurrentCreatedAt[roomId] = Date.now();
+  // Vecchio fallback "ultima aula": sostituito dallo storico per classe.
+  delete cls.priorAulaSnapshot;
+
   debouncedSave();
-  resetSeatingHistoryView(cls, cls.selectedClassroomId);
+  resetSeatingHistoryView(cls, roomId);
   alert('Seating layout saved!');
 }
 
 // ========== WHEEL ==========
 
+// Rotazione attuale della ruota (radianti, senso orario): resta tra un giro
+// e l'altro, così ogni giro riparte da dove si era fermato il precedente.
+let wheelRotation = 0;
+let wheelSpinning = false;
+
 function showWheel() {
   document.getElementById('wheelModal').classList.add('active');
-  drawWheel();
+  if (!wheelSpinning) document.getElementById('wheelResult').textContent = '';
+  drawWheel(wheelRotation);
 }
 
-function drawWheel() {
+function drawWheel(rotation = 0, highlightIndex = -1) {
   const cls = classes.find(c => c.id === currentClassId);
   const canvas = document.getElementById('wheelCanvas');
   const ctx = canvas.getContext('2d');
@@ -2702,16 +2765,28 @@ function drawWheel() {
     rootStyle.getPropertyValue('--classroom-violet').trim() || '#667eea'
   ];
 
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(rotation);
+
   students.forEach((student, i) => {
     ctx.fillStyle = wheelColors[i % wheelColors.length];
     ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.arc(centerX, centerY, radius, i * sliceAngle, (i + 1) * sliceAngle);
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, radius, i * sliceAngle, (i + 1) * sliceAngle);
     ctx.closePath();
     ctx.fill();
-    
+
+    // Spicchio estratto evidenziato a ruota ferma
+    if (i === highlightIndex) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
     ctx.save();
-    ctx.translate(centerX, centerY);
     ctx.rotate(i * sliceAngle + sliceAngle / 2);
     ctx.textAlign = 'right';
     ctx.fillStyle = 'white';
@@ -2719,43 +2794,61 @@ function drawWheel() {
     ctx.fillText(student.displayName, radius - 20, 5);
     ctx.restore();
   });
-  
+
   ctx.fillStyle = 'white';
   ctx.beginPath();
-  ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
+  ctx.arc(0, 0, 30, 0, 2 * Math.PI);
   ctx.fill();
+  ctx.restore();
+
+  // Freccia fissa in alto (non gira con la ruota): indica lo studente estratto.
+  ctx.beginPath();
+  ctx.moveTo(centerX - 16, 2);
+  ctx.lineTo(centerX + 16, 2);
+  ctx.lineTo(centerX, 46);
+  ctx.closePath();
+  ctx.fillStyle = '#222';
+  ctx.fill();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 3;
+  ctx.stroke();
 }
 
 function spinWheel() {
   const cls = classes.find(c => c.id === currentClassId);
-  const canvas = document.getElementById('wheelCanvas');
-  const ctx = canvas.getContext('2d');
   const students = cls.students;
-  
-  if (!students.length) return;
-  
-  const spinDuration = 3000;
-  const totalRotation = (5 + Math.random() * 3) * 360 + Math.random() * 360;
+
+  if (!students.length || wheelSpinning) return;
+  wheelSpinning = true;
+
+  // Prima si estrae lo studente, poi si calcola di quanto girare perché la
+  // ruota si fermi col SUO spicchio sotto la freccia (in alto, -90°): così
+  // chi esce è proprio quello su cui la ruota si è fermata.
+  const TWO_PI = 2 * Math.PI;
+  const sliceAngle = TWO_PI / students.length;
+  const winnerIndex = Math.floor(Math.random() * students.length);
+  const jitter = (Math.random() - 0.5) * sliceAngle * 0.7; // non sempre al centro esatto
+  const targetAngle = -Math.PI / 2 - (winnerIndex + 0.5) * sliceAngle + jitter;
+  const startRotation = wheelRotation;
+  const delta = (((targetAngle - startRotation) % TWO_PI) + TWO_PI) % TWO_PI;
+  const totalRotation = (5 + Math.floor(Math.random() * 3)) * TWO_PI + delta;
+
+  const spinDuration = 4000;
   const startTime = Date.now();
-  
+
   document.getElementById('wheelResult').textContent = 'Spinning...';
-  
+
   function animate() {
     const progress = Math.min((Date.now() - startTime) / spinDuration, 1);
-    const rotation = (1 - Math.pow(1 - progress, 3)) * totalRotation;
-    
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((rotation * Math.PI) / 180);
-    ctx.translate(-canvas.width / 2, -canvas.height / 2);
-    drawWheel();
-    ctx.restore();
-    
+    wheelRotation = startRotation + (1 - Math.pow(1 - progress, 3)) * totalRotation;
+
     if (progress < 1) {
+      drawWheel(wheelRotation);
       requestAnimationFrame(animate);
     } else {
-      const winnerIndex = Math.floor(((360 - (rotation % 360)) % 360) / (360 / students.length));
+      wheelRotation = ((wheelRotation % TWO_PI) + TWO_PI) % TWO_PI;
+      drawWheel(wheelRotation, winnerIndex);
+      wheelSpinning = false;
       document.getElementById('wheelResult').textContent = `Selected: ${students[winnerIndex].displayName}`;
     }
   }
@@ -2825,26 +2918,46 @@ function showSeatingHistoryOverlay(entry) {
   if (!overlay) return;
   overlay.innerHTML = '';
 
-  // Le disposizioni "da un'altra aula" (fallback quando l'aula attuale non
-  // ha ancora un suo storico) vanno disegnate con i banchi di QUELL'aula,
-  // non con quelli dell'aula selezionata ora: possono avere layout diversi.
+  // Le disposizioni di un'altra aula vanno disegnate con i banchi di
+  // QUELL'aula, non con quelli dell'aula selezionata ora.
   const classroom = classrooms.find(c => c.id === (entry.classroomId || _seatingHistoryClassroomId));
   const cls = classes.find(c => c.id === currentClassId);
   const color = cls ? classColors[cls.id] : null;
   if (color) overlay.style.setProperty('--seat-class-color', color);
   else overlay.style.removeProperty('--seat-class-color');
 
-  if (!classroom) {
+  // Banchi da disegnare: la "foto" salvata con la voce se c'è (resta
+  // identica anche se l'aula è stata poi modificata o eliminata), altrimenti
+  // i banchi attuali dell'aula. Per le voci vecchie senza foto, se gli id dei
+  // banchi non corrispondono più si usano le posizioni salvate nella voce.
+  const seating = entry.seating || [];
+  let desks = null;
+  let teacherDesk = entry.teacherDesk || null;
+  if (Array.isArray(entry.desks) && entry.desks.length) {
+    desks = entry.desks.map(d => ({ x: d.x, y: d.y, name: d.displayName || '' }));
+  } else if (classroom) {
+    const seatMap = new Map(seating.map(s => [s.deskId, s.displayName]));
+    const matches = classroom.desks.some(d => seatMap.get(d.id));
+    if (matches || !seating.some(s => s.displayName && Number.isFinite(s.x))) {
+      desks = classroom.desks.map(d => ({ x: d.x, y: d.y, name: seatMap.get(d.id) || '' }));
+    } else {
+      desks = seating.filter(s => Number.isFinite(s.x)).map(s => ({ x: s.x, y: s.y, name: s.displayName || '' }));
+    }
+  }
+  if (!teacherDesk && classroom) teacherDesk = getTeacherDesk(classroom);
+
+  if (!desks) {
     overlay.innerHTML = '<div style="text-align:center;padding:40px;color:#8a8a8a;">Aula non trovata.</div>';
   } else {
-    if (entry.otherAulaName) {
+    if (entry.classroomId && entry.classroomId !== _seatingHistoryClassroomId) {
+      const roomName = (classroom && classroom.name) || entry.classroomName || '';
       const badge = document.createElement('div');
       badge.className = 'seating-history-other-aula-badge';
-      badge.textContent = `Ultima disposizione in "${entry.otherAulaName}"`;
+      badge.textContent = `Disposizione in "${roomName}"`;
       overlay.appendChild(badge);
     }
 
-    const teacherDesk = getTeacherDesk(classroom);
+    if (!teacherDesk) teacherDesk = { x: 0, y: 0 };
     const scale = getDeskScale();
     const deskEl = document.createElement('div');
     deskEl.className = 'seating-history-desk';
@@ -2860,9 +2973,8 @@ function showSeatingHistoryOverlay(entry) {
     deskEl.appendChild(deskLabel);
     overlay.appendChild(deskEl);
 
-    const seatMap = new Map((entry.seating || []).map(s => [s.deskId, s.displayName]));
-    classroom.desks.forEach(desk => {
-      const name = seatMap.get(desk.id) || '';
+    desks.forEach(desk => {
+      const name = desk.name;
       const seat = document.createElement('div');
       seat.className = 'seating-history-seat' + (name ? '' : ' empty');
       seat.style.left = (desk.x * scale) + 'px';
@@ -2881,6 +2993,17 @@ function showSeatingHistoryOverlay(entry) {
 
   overlay.classList.add('active');
   setSeatingControlsEnabled(false);
+
+  // Una disposizione di un'altra aula può essere più "lunga" del piano
+  // attuale: allarga il chart quanto basta finché l'anteprima è aperta.
+  const chart = document.getElementById('seatingChart');
+  if (chart) {
+    let maxBottom = 0;
+    overlay.querySelectorAll('.seating-history-seat, .seating-history-desk').forEach(el => {
+      maxBottom = Math.max(maxBottom, (parseInt(el.style.top) || 0) + (el.offsetHeight || 0));
+    });
+    chart.style.minHeight = maxBottom ? (maxBottom + CHART_PADDING) + 'px' : '';
+  }
 }
 
 function hideSeatingHistoryOverlay() {
@@ -2889,6 +3012,8 @@ function hideSeatingHistoryOverlay() {
     overlay.classList.remove('active');
     overlay.innerHTML = '';
   }
+  const chart = document.getElementById('seatingChart');
+  if (chart) chart.style.minHeight = '';
   setSeatingControlsEnabled(true);
 }
 
@@ -2964,7 +3089,7 @@ function deleteSeatingHistoryEntry() {
   if (!cls || !_seatingHistoryClassroomId) return;
   ensureSeatingHistory(cls);
 
-  const list = cls.seatingHistory[_seatingHistoryClassroomId] || [];
+  const list = cls.seatingHistory[entry.classroomId || _seatingHistoryClassroomId] || [];
   const idx = list.findIndex(e => e.id === entry.id);
   if (idx === -1) return;
 
@@ -2999,7 +3124,7 @@ function updateSeatingHistoryDate(field, value) {
     cls.seatingCurrentStart[_seatingHistoryClassroomId] = candidateStart;
     entry.startDate = candidateStart;
   } else {
-    const list = cls.seatingHistory[_seatingHistoryClassroomId] || [];
+    const list = cls.seatingHistory[entry.classroomId || _seatingHistoryClassroomId] || [];
     const idx = list.findIndex(e => e.id === entry.id);
     if (idx === -1) return;
     list[idx].startDate = candidateStart;
