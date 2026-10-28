@@ -1803,6 +1803,7 @@ function arrangeGroupsOnSeats() {
 
   closeModal('groupModal');
   showSyncIndicator('📐 Gruppi disposti sui banchi!', false);
+  scheduleSeatingAutosave();
 }
 
 // ── Entry point: bottoni del modal ────────────────────────────────────────────
@@ -2414,6 +2415,7 @@ function stopDragDesk() {
   dragGroupData = null;
   dragStartPoint = null;
   if (dragChartEl) updateChartHeight(dragChartEl);
+  if (dragChartEl && dragChartEl.id === 'seatingChart') scheduleSeatingAutosave();
   dragChartEl = null;
   document.removeEventListener('mousemove', dragDesk);
   document.removeEventListener('mouseup', stopDragDesk);
@@ -2465,6 +2467,7 @@ function dropStudent(e) {
     
     targetSeat.classList.toggle('empty', !targetName.dataset.name);
     draggedFromSeat.classList.toggle('empty', !sourceName.dataset.name);
+    scheduleSeatingAutosave();
   }
   
   document.querySelectorAll('.student-seat').forEach(s => s.classList.remove('drop-target'));
@@ -2508,6 +2511,7 @@ function randomizeSeating() {
       seat.classList.add('empty');
     }
   });
+  scheduleSeatingAutosave();
 }
 
 // ========== SEATING HISTORY (storico disposizioni) ==========
@@ -2734,6 +2738,8 @@ function hasUnsavedSeatingChanges() {
 }
 
 function confirmLeaveUnsavedSeating() {
+  // Un salvataggio automatico in attesa va fatto subito, prima di uscire.
+  if (_seatingAutosaveTimer) autosaveSeating();
   if (!hasUnsavedSeatingChanges()) return true;
   return confirm('La disposizione dei banchi non è stata salvata.\nSei sicura di voler uscire senza salvare?');
 }
@@ -2752,22 +2758,85 @@ function saveSeating() {
     return;
   }
 
-  const newSeating = readLiveSeating();
-
   const roomId = cls.selectedClassroomId;
+  commitSeating(cls, roomId, readLiveSeating(), false);
+  resetSeatingHistoryView(cls, roomId);
+  alert('Seating layout saved!');
+}
+
+// Scrive una disposizione come "attuale" dell'aula, archiviando la precedente
+// nello storico. Con auto = true (salvataggio automatico) una disposizione
+// già salvata in automatico OGGI viene sovrascritta senza archiviarla: così
+// le prove intermedie (mescola, sposta, gruppi...) non riempiono lo storico.
+// Un salvataggio manuale, o il primo del giorno, archivia sempre la precedente.
+function commitSeating(cls, roomId, newSeating, auto) {
+  ensureSeatingByClassroom(cls);
+  ensureSeatingHistory(cls);
+  if (!cls.seatingCurrentAuto || typeof cls.seatingCurrentAuto !== 'object') cls.seatingCurrentAuto = {};
+  if (!cls.seatingCurrentCreatedAt || typeof cls.seatingCurrentCreatedAt !== 'object') cls.seatingCurrentCreatedAt = {};
+
   const classroom = classrooms.find(c => c.id === roomId);
-  const changed = seatingSignature(cls.seatingByClassroom[roomId], classroom) !== seatingSignature(newSeating, classroom);
-  archiveSeatingIfChanged(cls, roomId, newSeating);
+  const prev = cls.seatingByClassroom[roomId];
+  const changed = seatingSignature(prev, classroom) !== seatingSignature(newSeating, classroom);
+  const overwriteAuto = auto && prev && prev.length > 0 && cls.seatingCurrentAuto[roomId] === todayISO();
+
+  if (!overwriteAuto) archiveSeatingIfChanged(cls, roomId, newSeating);
 
   cls.seatingByClassroom[roomId] = newSeating;
-  if (!cls.seatingCurrentCreatedAt || typeof cls.seatingCurrentCreatedAt !== 'object') cls.seatingCurrentCreatedAt = {};
-  if (changed || !cls.seatingCurrentCreatedAt[roomId]) cls.seatingCurrentCreatedAt[roomId] = Date.now();
+  if ((changed && !overwriteAuto) || !cls.seatingCurrentCreatedAt[roomId]) cls.seatingCurrentCreatedAt[roomId] = Date.now();
+  if (auto) cls.seatingCurrentAuto[roomId] = todayISO();
+  else delete cls.seatingCurrentAuto[roomId];
   // Vecchio fallback "ultima aula": sostituito dallo storico per classe.
   delete cls.priorAulaSnapshot;
 
   debouncedSave();
+}
+
+// ===== SALVATAGGIO AUTOMATICO della disposizione =====
+// Dopo ogni modifica fatta dall'utente (mescola, sposta alunni o banchi,
+// gruppi sui banchi) la disposizione a video viene salvata da sola dopo
+// una breve pausa, con un avviso visibile. "Save Layout" resta per creare
+// un punto di salvataggio che finisce sempre nello storico.
+let _seatingAutosaveTimer = null;
+
+function scheduleSeatingAutosave() {
+  clearTimeout(_seatingAutosaveTimer);
+  _seatingAutosaveTimer = setTimeout(autosaveSeating, 1500);
+}
+
+function autosaveSeating() {
+  clearTimeout(_seatingAutosaveTimer);
+  _seatingAutosaveTimer = null;
+  const overlay = document.getElementById('seatingHistoryOverlay');
+  if (overlay && overlay.classList.contains('active')) return;
+  if (!hasUnsavedSeatingChanges()) return;
+  const cls = classes.find(c => c.id === currentClassId);
+  const roomId = cls.selectedClassroomId;
+  commitSeating(cls, roomId, readLiveSeating(), true);
   resetSeatingHistoryView(cls, roomId);
-  alert('Seating layout saved!');
+  showSyncIndicator('💾 Disposizione salvata automaticamente', false);
+}
+
+// Ripristina una disposizione dello storico (stessa aula) come attuale.
+// La disposizione che c'era prima, anche se mai salvata, viene archiviata:
+// niente si perde, e si può sempre tornare indietro.
+function restoreSeatingHistoryEntry() {
+  const entry = _seatingHistoryTimeline[_seatingHistoryIndex];
+  if (!entry || entry.isCurrent || entry.readOnly) return;
+  const cls = classes.find(c => c.id === currentClassId);
+  const roomId = _seatingHistoryClassroomId;
+  if (!cls || !roomId || (entry.classroomId && entry.classroomId !== roomId)) return;
+
+  if (!confirm('Ripristinare questa disposizione?\nQuella attuale verrà archiviata nello storico.')) return;
+
+  clearTimeout(_seatingAutosaveTimer);
+  // Disposizione a video non ancora salvata: la si mette prima al sicuro.
+  if (hasUnsavedSeatingChanges()) commitSeating(cls, roomId, readLiveSeating(), true);
+
+  const restored = JSON.parse(JSON.stringify(entry.seating || []));
+  commitSeating(cls, roomId, restored, false);
+  renderSeatingChart();
+  showSyncIndicator('↩️ Disposizione ripristinata', false);
 }
 
 // ========== WHEEL ==========
@@ -3162,6 +3231,12 @@ function updateSeatingHistoryBar() {
     // Si può eliminare solo una disposizione PASSATA (mai quella attuale).
     // Display esplicito: con '' varrebbe il display:none del CSS.
     deleteBtn.style.display = entry.isCurrent ? 'none' : 'inline-block';
+  }
+  const restoreBtn = document.getElementById('seatingHistoryRestoreBtn');
+  if (restoreBtn) {
+    // Si ripristina solo una disposizione passata della stessa aula.
+    const sameRoom = !entry.classroomId || entry.classroomId === _seatingHistoryClassroomId;
+    restoreBtn.style.display = (!entry.isCurrent && !entry.readOnly && sameRoom) ? 'inline-block' : 'none';
   }
 }
 
