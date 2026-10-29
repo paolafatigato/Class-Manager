@@ -1169,6 +1169,29 @@ function deleteClassroom(classroomId) {
   renderClassList();
 }
 
+// Miniatura in trasparenza della disposizione banchi (cattedra + banchi),
+// scalata in percentuale sul riquadro della card.
+function buildClassroomPreview(classroom) {
+  const items = (classroom.desks || []).map(d => ({ x: d.x, y: d.y, w: DESK_W, h: DESK_H, t: 0 }));
+  const td = classroom.teacherDesk;
+  if (td && Number.isFinite(td.x) && Number.isFinite(td.y)) {
+    items.push({ x: td.x, y: td.y, w: TEACHER_DESK_W, h: TEACHER_DESK_H, t: 1 });
+  }
+  const valid = items.filter(i => Number.isFinite(i.x) && Number.isFinite(i.y));
+  if (!valid.length) return '';
+
+  const minX = Math.min(...valid.map(i => i.x));
+  const minY = Math.min(...valid.map(i => i.y));
+  const maxX = Math.max(...valid.map(i => i.x + i.w));
+  const maxY = Math.max(...valid.map(i => i.y + i.h));
+  const W = maxX - minX, H = maxY - minY;
+
+  const rects = valid.map(i =>
+    `<rect class="cr-desk${i.t ? ' cr-teacher' : ''}" x="${i.x - minX}" y="${i.y - minY}" width="${i.w}" height="${i.h}" rx="10"/>`
+  ).join('');
+  return `<svg class="classroom-preview" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${rects}</svg>`;
+}
+
 function renderClassroomList() {
   const container = document.getElementById('classroomList');
   container.innerHTML = '';
@@ -1179,6 +1202,7 @@ function renderClassroomList() {
     card.dataset.id = classroom.id;
 
     card.innerHTML = `
+      ${buildClassroomPreview(classroom)}
       <span class="drag-handle" title="Trascina per riordinare">${DRAG_HANDLE_SVG}</span>
       <button class="delete-btn" onclick="event.stopPropagation(); deleteClassroom('${classroom.id}')">×</button>
       <h3>${classroom.name}</h3>
@@ -1687,6 +1711,9 @@ function arrangeGroupsOnSeats() {
     y: parseInt(el.style.top)  || 0,
     w: el.offsetWidth  || 120, // larghezza reale del banco (fallback al default CSS)
     h: el.offsetHeight || 80,  // altezza reale del banco
+    pos: seatElementPosition(el), // coordinate non scalate (per la storia dei vicini)
+    name: '',
+    group: -1,
     assigned: false
   }));
 
@@ -1760,17 +1787,15 @@ function arrangeGroupsOnSeats() {
       cluster.push(bestSeat);
     }
 
-    // Assegna nomi e colora
+    // Assegna nomi (scritti nel DOM dopo l'ottimizzazione dei vicini) e colora
     cluster.forEach((seat, sIdx) => {
       const student = group[sIdx];
       if (!student) return;
       const nameEl = seat.el.querySelector('.student-name');
       if (!nameEl) return;
 
-      const name = student.displayName || student.fullName || student;
-      nameEl.textContent = name;
-      nameEl.dataset.name = name;
-      seat.el.classList.remove('empty');
+      seat.name = student.displayName || student.fullName || student;
+      seat.group = gIdx;
 
       // Highlight con colore gruppo
       seat.el.style.transition = 'border-color .3s, box-shadow .3s';
@@ -1779,6 +1804,28 @@ function arrangeGroupsOnSeats() {
 
       assignedSeats.push(seat.el);
     });
+  });
+
+  // Evita di rimettere vicini chi lo era nelle ultime disposizioni: i
+  // cambi avvengono solo tra studenti dello stesso gruppo, quindi i gruppi
+  // restano uguali e cambia solo chi sta accanto a chi dentro il cluster.
+  const cls = classes.find(c => c.id === currentClassId);
+  const forbidden = getRecentNeighborPairs(cls, cls && cls.selectedClassroomId);
+  if (forbidden.size) {
+    const names = pool.map(s => s.name);
+    const adj = buildSeatAdjacency(pool.map(s => s.pos));
+    warnRepeatedNeighbors(reduceNeighborConflicts(names, adj, forbidden, (i, j) => pool[i].group === pool[j].group));
+    pool.forEach((s, i) => { s.name = names[i]; });
+  }
+
+  // Scrive i nomi nei banchi assegnati
+  pool.forEach(s => {
+    if (!s.assigned || !s.name) return;
+    const nameEl = s.el.querySelector('.student-name');
+    if (!nameEl) return;
+    nameEl.textContent = s.name;
+    nameEl.dataset.name = s.name;
+    s.el.classList.remove('empty');
   });
 
   // Svuota i banchi rimasti liberi
@@ -2486,18 +2533,123 @@ function dropStudent(e) {
 
 // ========== RANDOMIZE & SAVE ==========
 
+// ---- Anti-ripetizione dei vicini ----
+// Due studenti che sono stati "vicini di banco" (banchi affiancati, stessa
+// fila) in una delle ultime RECENT_NEIGHBOR_ARRANGEMENTS disposizioni salvate
+// di quest'aula non vengono rimessi vicini da Randomize / Crea Gruppi. Se
+// erano vicini 3 o più disposizioni fa, va bene. Se il vincolo è impossibile
+// da rispettare (poche combinazioni) si minimizzano le coppie ripetute.
+const RECENT_NEIGHBOR_ARRANGEMENTS = 2;
+const SEAT_SIDE_GAP = Math.min(DESK_W, DESK_H) * 0.3;
+
+// a, b: {x, y} NON scalati (coordinate dell'aula)
+function areDesksSideBySide(a, b) {
+  const vOverlap = Math.min(a.y + DESK_H, b.y + DESK_H) - Math.max(a.y, b.y);
+  if (vOverlap < DESK_H * 0.5) return false;
+  const hGap = Math.max(a.x, b.x) - Math.min(a.x + DESK_W, b.x + DESK_W);
+  return hGap <= SEAT_SIDE_GAP;
+}
+
+function neighborPairKey(a, b) {
+  return a < b ? a + '\u0001' + b : b + '\u0001' + a;
+}
+
+// Set di coppie (chiave) di studenti vicini nelle ultime disposizioni dell'aula.
+function getRecentNeighborPairs(cls, roomId) {
+  const pairs = new Set();
+  if (!cls || !roomId) return pairs;
+  ensureSeatingHistory(cls);
+  const classroom = classrooms.find(c => c.id === roomId);
+
+  const arrangements = (Array.isArray(cls.seatingHistory[roomId]) ? cls.seatingHistory[roomId] : [])
+    .slice()
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    .map(e => (Array.isArray(e.desks) && e.desks.length)
+      ? e.desks
+      : normalizeSeatingForRoom(e.seating, classroom));
+  const current = cls.seatingByClassroom ? cls.seatingByClassroom[roomId] : null;
+  if (Array.isArray(current) && current.length) arrangements.push(normalizeSeatingForRoom(current, classroom));
+
+  arrangements.slice(-RECENT_NEIGHBOR_ARRANGEMENTS).forEach(desks => {
+    const named = desks.filter(d => d.displayName && Number.isFinite(d.x) && Number.isFinite(d.y));
+    for (let i = 0; i < named.length; i++) {
+      for (let j = i + 1; j < named.length; j++) {
+        if (areDesksSideBySide(named[i], named[j])) pairs.add(neighborPairKey(named[i].displayName, named[j].displayName));
+      }
+    }
+  });
+  return pairs;
+}
+
+// Per ogni banco (seatPositions[i] = {x, y} non scalati) la lista degli indici dei banchi affiancati.
+function buildSeatAdjacency(seatPositions) {
+  const adj = seatPositions.map(() => []);
+  for (let i = 0; i < seatPositions.length; i++) {
+    for (let j = i + 1; j < seatPositions.length; j++) {
+      if (areDesksSideBySide(seatPositions[i], seatPositions[j])) { adj[i].push(j); adj[j].push(i); }
+    }
+  }
+  return adj;
+}
+
+function countNeighborConflicts(names, adj, forbidden) {
+  let n = 0;
+  for (let i = 0; i < names.length; i++) {
+    if (!names[i]) continue;
+    for (const j of adj[i]) {
+      if (j > i && names[j] && forbidden.has(neighborPairKey(names[i], names[j]))) n++;
+    }
+  }
+  return n;
+}
+
+// Scambia nomi tra banchi (solo se canSwap(i, j)) finché non restano coppie
+// vietate o i tentativi finiscono. Modifica `names` sul posto e ritorna le coppie vietate rimaste.
+function reduceNeighborConflicts(names, adj, forbidden, canSwap) {
+  let cost = countNeighborConflicts(names, adj, forbidden);
+  for (let iter = 0; iter < 1500 && cost > 0; iter++) {
+    const i = Math.floor(Math.random() * names.length);
+    const j = Math.floor(Math.random() * names.length);
+    if (i === j || names[i] === names[j] || !canSwap(i, j)) continue;
+    [names[i], names[j]] = [names[j], names[i]];
+    const c = countNeighborConflicts(names, adj, forbidden);
+    if (c <= cost) cost = c;
+    else [names[i], names[j]] = [names[j], names[i]];
+  }
+  return cost;
+}
+
+function warnRepeatedNeighbors(conflicts) {
+  if (conflicts > 0) {
+    showSyncIndicator(`⚠️ ${conflicts} coppia/e già vicine di recente non evitabili`, true);
+  }
+}
+
 function randomizeSeating() {
   const seats = Array.from(document.querySelectorAll('.student-seat'));
   const studentNames = [];
-  
+
   seats.forEach(seat => {
     const nameEl = seat.querySelector('.student-name');
     if (nameEl.dataset.name) studentNames.push(nameEl.dataset.name);
   });
-  
-  const shuffled = [...studentNames].sort(() => Math.random() - 0.5);
+
+  const cls = classes.find(c => c.id === currentClassId);
+  const forbidden = getRecentNeighborPairs(cls, cls && cls.selectedClassroomId);
+  let shuffled = [...studentNames].sort(() => Math.random() - 0.5);
+  if (forbidden.size) {
+    const adj = buildSeatAdjacency(seats.map(seatElementPosition));
+    let best = null, bestCost = Infinity;
+    for (let attempt = 0; attempt < 40 && bestCost > 0; attempt++) {
+      const candidate = [...studentNames].sort(() => Math.random() - 0.5);
+      const cost = reduceNeighborConflicts(candidate, adj, forbidden, (i, j) => i < candidate.length && j < candidate.length);
+      if (cost < bestCost) { best = candidate; bestCost = cost; }
+    }
+    if (best) shuffled = best;
+    warnRepeatedNeighbors(bestCost);
+  }
   let i = 0;
-  
+
   seats.forEach(seat => {
     const nameEl = seat.querySelector('.student-name');
     if (i < shuffled.length) {
